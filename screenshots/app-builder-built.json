@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Relay",
+      "hasCanvas": false,
+      "bodyTextLen": 698,
+      "bodyTextHash": "1c856fd7752324ca384174bd7137836e78509c10f120b0a18a059bf865bb74a4",
+      "bodyTextPrefix": "Relay живой пул подписок Сканировать 0/0 живых 0/3 источники 0 р",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Relay",
+      "hasCanvas": false,
+      "bodyTextLen": 698,
+      "bodyTextHash": "1c856fd7752324ca384174bd7137836e78509c10f120b0a18a059bf865bb74a4",
+      "bodyTextPrefix": "Relay живой пул подписок Сканировать 0/0 живых 0/3 источники 0 р",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
