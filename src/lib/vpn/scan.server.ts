@@ -1,19 +1,30 @@
+import { DEFAULT_TEST_URL } from "./constants";
 import { fetchSourceText } from "./fetch-source.server";
+import { canRunMihomo } from "./mihomo-bin.server";
 import { parseSubscription, endpointKey } from "./parse";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
 import { pickExportNodes } from "./select";
-import type { ParsedNode, ScanResult, SourceDef, SourceScan } from "./types";
+import type { ParsedNode, ProbeMode, ProbedNode, ScanResult, SourceDef, SourceScan } from "./types";
 
 export { pickExportNodes };
 
+export interface ScanOpts {
+  perSource?: number;
+  globalCap?: number;
+  timeoutMs?: number;
+  real?: boolean;
+  testUrl?: string;
+}
+
 export async function runScan(
   sources: SourceDef[],
-  opts?: { perSource?: number; globalCap?: number; timeoutMs?: number },
+  opts?: ScanOpts,
 ): Promise<ScanResult> {
   const perSource = opts?.perSource ?? 16;
   const globalCap = opts?.globalCap ?? 64;
   const timeoutMs = opts?.timeoutMs ?? 2200;
+  const wantReal = opts?.real !== false;
   const started = Date.now();
 
   const enabled = sources.filter((s) => s.enabled);
@@ -33,7 +44,35 @@ export async function runScan(
   const allNodes = fetched.flatMap((f) => f.nodes);
   const uniqueTotal = new Set(allNodes.map(endpointKey)).size;
   const sampled = sampleForProbe(allNodes, perSource, globalCap);
-  const probed = await probeNodes(sampled, timeoutMs);
+
+  let probeMode: ProbeMode = "tcp";
+  let testUrl: string | null = null;
+  let probeNote: string | null = null;
+  let probed: ProbedNode[];
+
+  if (wantReal && canRunMihomo()) {
+    try {
+      const { probeNodesMihomo } = await import("./mihomo-probe.server");
+      const real = await probeNodesMihomo(
+        sampled,
+        opts?.testUrl || DEFAULT_TEST_URL,
+      );
+      probed = real.nodes;
+      probeMode = "mihomo";
+      testUrl = real.testUrl;
+      probeNote = real.note;
+    } catch (err) {
+      probed = await probeNodes(sampled, timeoutMs);
+      probeMode = "tcp";
+      probeNote =
+        err instanceof Error
+          ? `Настоящая проверка не стартовала: ${err.message}. Осталась проверка порта.`
+          : "Настоящая проверка не стартовала. Осталась проверка порта.";
+    }
+  } else {
+    probed = await probeNodes(sampled, timeoutMs);
+    if (wantReal) probeNote = "На этом хосте нельзя запустить ядро — проверка порта.";
+  }
 
   const sourcesOut: SourceScan[] = fetched.map((f) => {
     const mine = probed.filter((n) => n.sourceId === f.source.id);
@@ -67,5 +106,8 @@ export async function runScan(
     nodes: probed,
     parsedTotal: allNodes.length,
     uniqueTotal,
+    probeMode,
+    testUrl,
+    probeNote,
   };
 }

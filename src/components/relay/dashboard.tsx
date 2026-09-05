@@ -18,9 +18,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DEFAULT_SOURCES, SETTINGS_KEY, STORAGE_KEY } from "@/lib/vpn/defaults";
-import { scanSources } from "@/lib/vpn/scan.functions";
+import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N, DEFAULT_TEST_URL } from "@/lib/vpn/constants";
+import { getProbeCaps, scanSources } from "@/lib/vpn/scan.functions";
 import { formatMs, pickActive } from "@/lib/vpn/select";
 import type {
+  ExportFormat,
   ProbedNode,
   ScanResult,
   SelectStrategy,
@@ -30,11 +32,19 @@ import type {
 interface Settings {
   autoRefresh: boolean;
   strategy: SelectStrategy;
+  realProbe: boolean;
+  testUrl: string;
+  exportFmt: ExportFormat;
+  exportN: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   autoRefresh: false,
   strategy: "fastest",
+  realProbe: true,
+  testUrl: DEFAULT_TEST_URL,
+  exportFmt: DEFAULT_EXPORT_FMT,
+  exportN: DEFAULT_EXPORT_N,
 };
 
 function loadSources(): SourceDef[] {
@@ -65,6 +75,7 @@ export function Dashboard() {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [active, setActive] = useState<ProbedNode | null>(null);
   const [persist, setPersist] = useState(false);
+  const [mihomoOk, setMihomoOk] = useState(true);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
 
@@ -72,6 +83,9 @@ export function Dashboard() {
     setSources(loadSources());
     setSettings(loadSettings());
     setPersist(true);
+    getProbeCaps()
+      .then((caps) => setMihomoOk(Boolean(caps.mihomo)))
+      .catch(() => setMihomoOk(false));
   }, []);
 
   useEffect(() => {
@@ -94,8 +108,10 @@ export function Dashboard() {
         data: {
           sources: enabled,
           perSource: 16,
-          globalCap: 64,
-          timeoutMs: 2200,
+          globalCap: settings.realProbe ? 48 : 64,
+          timeoutMs: settings.realProbe ? 5000 : 2200,
+          real: settings.realProbe,
+          testUrl: settings.testUrl || DEFAULT_TEST_URL,
         },
       });
     },
@@ -105,10 +121,19 @@ export function Dashboard() {
       setActive(next);
       const nAlive = data.nodes.filter((n) => n.alive).length;
       if (nAlive === 0) {
-        toast.error("Живых портов не нашлось. Смените списки или повторите.");
+        toast.error(
+          data.probeMode === "mihomo"
+            ? "Ни один сервер не пропустил трафик. Смените списки или URL проверки."
+            : "Живых портов не нашлось. Смените списки или повторите.",
+        );
+      } else if (data.probeMode === "mihomo") {
+        toast.success(
+          `Настоящая проверка · ${nAlive} серверов пропустили трафик`,
+        );
       } else {
-        toast.success(`Пул обновлён · ${nAlive} живых из ${data.nodes.length}`);
+        toast.success(`Проверка порта · ${nAlive} открытых из ${data.nodes.length}`);
       }
+      if (data.probeNote) toast.message(data.probeNote);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Скан не удался");
@@ -242,7 +267,11 @@ export function Dashboard() {
               className="h-12 w-full"
             >
               <RefreshCcw className={scan.isPending ? "animate-spin" : ""} />
-              {scan.isPending ? "Проверяю списки" : "Обновить пул"}
+              {scan.isPending
+                ? settings.realProbe
+                  ? "Проверяю туннель"
+                  : "Проверяю порты"
+                : "Обновить пул"}
             </Button>
             <Button
               type="button"
@@ -256,7 +285,7 @@ export function Dashboard() {
           </div>
           <div className="w-full min-w-0 space-y-3 rounded-xl bg-surface p-4 shadow-border">
             <div className="flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Автообновление</p>
                 <p className="text-xs text-fg-muted">каждые 3 минуты</p>
               </div>
@@ -267,6 +296,34 @@ export function Dashboard() {
                 }
               />
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Настоящая проверка</p>
+                <p className="text-xs text-fg-muted">
+                  {mihomoOk
+                    ? "трафик через ядро mihomo"
+                    : "ядро недоступно на этом хосте"}
+                </p>
+              </div>
+              <Switch
+                checked={settings.realProbe && mihomoOk}
+                disabled={!mihomoOk}
+                onCheckedChange={(realProbe) =>
+                  setSettings((s) => ({ ...s, realProbe }))
+                }
+              />
+            </div>
+            <label className="block space-y-1">
+              <span className="text-xs text-fg-muted">URL проверки</span>
+              <input
+                value={settings.testUrl}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, testUrl: e.target.value }))
+                }
+                placeholder={DEFAULT_TEST_URL}
+                className="h-10 w-full min-w-0 rounded-md bg-bg-subtle px-3 font-mono text-xs text-fg"
+              />
+            </label>
             <button
               type="button"
               onClick={cycleStrategy}
@@ -278,9 +335,14 @@ export function Dashboard() {
               </span>
             </button>
             <p className="text-xs leading-relaxed text-fg-subtle">
+              {result?.probeMode === "mihomo"
+                ? "В пуле только сервера, через которые прошёл трафик."
+                : result
+                  ? "Сейчас проверка порта: открытый порт ещё не значит, что VPN живой."
+                  : "Включите настоящую проверку и обновите пул."}
               {active
-                ? `Активная: ${active.country ?? "XX"} ${active.protocol} ${formatMs(active.latency)} · ${active.sourceName}`
-                : "Активной ноды нет — сначала сканируйте."}
+                ? ` Активная: ${active.country ?? "XX"} ${active.protocol} ${formatMs(active.latency)} · ${active.sourceName}`
+                : ""}
             </p>
           </div>
         </section>
@@ -324,7 +386,16 @@ export function Dashboard() {
               />
             </TabsContent>
             <TabsContent value="export">
-              <ExportPanel result={result} sources={sources} />
+              <ExportPanel
+                result={result}
+                sources={sources}
+                fmt={settings.exportFmt}
+                n={settings.exportN}
+                real={settings.realProbe && mihomoOk}
+                testUrl={settings.testUrl}
+                onFmt={(exportFmt) => setSettings((s) => ({ ...s, exportFmt }))}
+                onN={(exportN) => setSettings((s) => ({ ...s, exportN }))}
+              />
             </TabsContent>
           </Tabs>
         </section>

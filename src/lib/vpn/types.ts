@@ -69,7 +69,11 @@ export interface ScanResult {
   nodes: ProbedNode[];
   parsedTotal: number;
   uniqueTotal: number;
+  probeMode: ProbeMode;
+  testUrl: string | null;
+  probeNote: string | null;
 }
 
 export type ExportFormat = "clash" | "uri" | "b64";
 export type SelectStrategy = "fastest" | "fallback" | "balanced";
+export type ProbeMode = "mihomo" | "tcp";

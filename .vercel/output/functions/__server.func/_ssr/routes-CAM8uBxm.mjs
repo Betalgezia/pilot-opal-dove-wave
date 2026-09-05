@@ -1,4 +1,6 @@
 import { i as __toESM } from "../_runtime.mjs";
+import { t as DEFAULT_TEST_URL } from "./mihomo-bin.server-BqQnOcsW.mjs";
+import { n as buildMihomoYaml, r as buildUriList } from "./mihomo-BZFtDaS-.mjs";
 import { t as cva } from "../_libs/class-variance-authority+clsx.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { n as Slot, s as require_jsx_runtime } from "../_libs/@radix-ui/react-collection+[...].mjs";
@@ -7,12 +9,12 @@ import { a as RefreshCcw, c as Info, d as Check, i as RotateCcw, l as Download, 
 import { t as useMutation } from "../_libs/tanstack__react-query.mjs";
 import { a as DialogOverlay$1, c as DialogTrigger$1, i as DialogDescription$1, n as DialogClose, o as DialogPortal$1, r as DialogContent$1, s as DialogTitle$1, t as Dialog$1 } from "../_libs/@radix-ui/react-dialog+[...].mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { a as encodeSourceParam, c as pickActive, i as cn, l as pickExportNodes, n as buildMihomoYaml, o as formatMs, r as buildUriList, s as normalizeSourceUrl, u as sourceNameFromUrl } from "./router-CX07c6yK.mjs";
+import { a as normalizeSourceUrl, c as sourceNameFromUrl, i as formatMs, n as cn, o as pickActive, r as encodeSourceParam, s as pickExportNodes } from "./router-P2QMY_Oy.mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { t as Root } from "../_libs/radix-ui__react-label.mjs";
 import { n as SwitchThumb, t as Switch$1 } from "../_libs/radix-ui__react-switch.mjs";
 import { i as Trigger, n as List, r as Root2, t as Content } from "../_libs/radix-ui__react-tabs.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-uW3S1AA2.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-CAM8uBxm.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function ConnectDial({ state, node, alive, total, onClick }) {
@@ -112,19 +114,54 @@ var Button = import_react.forwardRef(({ className, variant, size, asChild = fals
 	});
 });
 Button.displayName = "Button";
-function ExportPanel({ result, sources }) {
+var FMT_OPTIONS = [
+	{
+		id: "b64",
+		label: "b64",
+		hint: "Hiddify"
+	},
+	{
+		id: "clash",
+		label: "clash",
+		hint: "YAML"
+	},
+	{
+		id: "uri",
+		label: "uri",
+		hint: "список"
+	}
+];
+var N_OPTIONS = [
+	12,
+	24,
+	40,
+	60
+];
+function ExportPanel({ result, sources, fmt, n, real, testUrl, onFmt, onN }) {
 	const [copied, setCopied] = (0, import_react.useState)(null);
 	const enabled = sources.filter((s) => s.enabled).map((s) => s.url);
 	const subPath = (0, import_react.useMemo)(() => {
 		if (enabled.length === 0) return "";
-		return `/api/sub?u=${encodeSourceParam(enabled)}&fmt=clash&n=24`;
-	}, [enabled]);
-	const exportNodes = result ? pickExportNodes(result, 24) : [];
+		const params = new URLSearchParams();
+		params.set("u", encodeSourceParam(enabled));
+		params.set("fmt", fmt);
+		params.set("n", String(n));
+		params.set("real", real ? "1" : "0");
+		if (testUrl) params.set("test", testUrl);
+		return `/api/sub?${params.toString()}`;
+	}, [
+		enabled,
+		fmt,
+		n,
+		real,
+		testUrl
+	]);
+	const exportNodes = result ? pickExportNodes(result, n) : [];
 	const yaml = result ? buildMihomoYaml(exportNodes, result.sources) : "";
 	const uris = exportNodes.length ? buildUriList(exportNodes) : "";
 	async function copy(label, text) {
 		if (!text) {
-			toast.error("Сначала просканируйте пул");
+			toast.error("Сначала нажмите «Обновить пул»");
 			return;
 		}
 		await navigator.clipboard.writeText(text);
@@ -134,7 +171,7 @@ function ExportPanel({ result, sources }) {
 	}
 	function downloadYaml() {
 		if (!yaml) {
-			toast.error("Сначала просканируйте пул");
+			toast.error("Сначала нажмите «Обновить пул»");
 			return;
 		}
 		const blob = new Blob([yaml], { type: "text/yaml;charset=utf-8" });
@@ -144,81 +181,98 @@ function ExportPanel({ result, sources }) {
 		a.download = "relay.yaml";
 		a.click();
 		URL.revokeObjectURL(href);
+		toast.message("Ищите relay.yaml в папке «Загрузки». Если файла нет — скопируйте YAML.");
 	}
 	const subUrl = typeof window !== "undefined" && subPath ? `${window.location.origin}${subPath}` : subPath;
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "space-y-4",
-		children: [
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "rounded-xl bg-surface p-4 shadow-border",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-sm font-medium",
-						children: "Живая подписка"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "mt-1 text-sm text-fg-muted",
-						children: "Вставьте этот URL в Hiddify, Clash Meta или v2rayN. Relay каждый раз заново проверяет списки и отдаёт только живые ноды, равномерно из всех рабочих репозиториев."
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
-						className: "mt-3 max-h-24 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted",
-						children: subUrl || "Добавьте хотя бы один источник"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "mt-3 flex flex-wrap gap-2",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "rounded-xl bg-surface p-4 shadow-border",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "text-sm font-medium",
+					children: "Живая подписка"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mt-1 text-sm text-fg-muted",
+					children: "Готовая ссылка для Hiddify: New Profile → Add from clipboard. Формат и количество сразу вшиты в URL."
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-3 flex flex-wrap gap-2",
+					children: FMT_OPTIONS.map((opt) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+						type: "button",
+						onClick: () => onFmt(opt.id),
+						className: `h-9 rounded-md px-3 text-xs ${fmt === opt.id ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`,
+						children: [opt.label, /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "ml-1 opacity-70",
+							children: opt.hint
+						})]
+					}, opt.id))
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-2 flex flex-wrap gap-2",
+					children: N_OPTIONS.map((count) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: () => onN(count),
+						className: `h-9 min-w-11 rounded-md px-3 font-mono text-xs ${n === count ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`,
+						children: count
+					}, count))
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
+					className: "mt-3 max-h-24 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted",
+					children: subUrl || "Добавьте хотя бы один источник"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-3 flex flex-wrap gap-2",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						type: "button",
+						onClick: () => {
+							if (!subUrl) {
+								toast.error("Добавьте источник");
+								return;
+							}
+							copy("sub", subUrl);
+						},
+						children: [copied === "sub" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, {}), "Скопировать URL"]
+					})
+				})
+			]
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "rounded-xl bg-surface p-4 shadow-border",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "text-sm font-medium",
+					children: "Файл для компьютера"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mt-1 text-sm text-fg-muted",
+					children: "Если ссылка из превью не открывается на ПК — скачайте YAML и импортируйте в Hiddify или Clash Verge."
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "mt-3 flex flex-wrap gap-2",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
 							type: "button",
 							variant: "secondary",
-							onClick: () => copy("sub", subUrl),
-							children: [copied === "sub" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, {}), "Скопировать URL"]
-						})
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "rounded-xl bg-surface p-4 shadow-border",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-sm font-medium",
-						children: "Mihomo / Clash Meta"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "mt-1 text-sm text-fg-muted",
-						children: "Группа AUTO — url-test по самым быстрым. FALLBACK переключает целые источники, если репозиторий молчит. Это то, чего не умеет Hiddify: failover между конфигами, а не только между серверами внутри одного."
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "mt-3 flex flex-wrap gap-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
-							type: "button",
 							onClick: downloadYaml,
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, {}), "Скачать YAML"]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, {}), "Скачать relay.yaml"]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+							type: "button",
+							variant: "secondary",
+							onClick: () => copy("yaml", yaml),
+							children: [copied === "yaml" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, {}), "Скопировать YAML"]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
 							type: "button",
 							variant: "secondary",
 							onClick: () => copy("uri", uris),
 							children: [copied === "uri" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, {}), "Скопировать URI"]
-						})]
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
-				className: "space-y-2 rounded-xl bg-surface p-4 text-sm text-fg-muted shadow-border",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-						className: "font-medium text-fg",
-						children: "1."
-					}), " Hiddify: New Profile → Add from clipboard → вставьте URL подписки."] }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-						className: "font-medium text-fg",
-						children: "2."
-					}), " В профиле включите автообновление (1 час) и режим url-test."] }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-						className: "font-medium text-fg",
-						children: "3."
-					}), " Clash Meta / Mihomo: импортируйте YAML. Группа RELAY уже собрана."] })
-				]
-			})
-		]
+						})
+					]
+				})
+			]
+		})]
 	});
 }
 var badgeVariants = cva("inline-flex items-center rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tracking-wide", {
@@ -563,11 +617,18 @@ var scanSources = createServerFn({ method: "POST" }).validator(object({
 	sources: array(sourceSchema).min(1).max(16),
 	perSource: number().min(4).max(32).optional(),
 	globalCap: number().min(8).max(80).optional(),
-	timeoutMs: number().min(800).max(4e3).optional()
+	timeoutMs: number().min(800).max(8e3).optional(),
+	real: boolean().optional(),
+	testUrl: string().max(300).optional()
 })).handler(createSsrRpc("34d3a3363dc01d8ecc2768bf9d57bc6a757f83b85b4b97deed8921c52eb169f3"));
+var getProbeCaps = createServerFn({ method: "GET" }).handler(createSsrRpc("480bec4539a8c1f7da064d8399783afbbe608b29e5138cba86b9cf3cdab1897d"));
 var DEFAULT_SETTINGS = {
 	autoRefresh: false,
-	strategy: "fastest"
+	strategy: "fastest",
+	realProbe: true,
+	testUrl: DEFAULT_TEST_URL,
+	exportFmt: "b64",
+	exportN: 40
 };
 function loadSources() {
 	try {
@@ -598,12 +659,14 @@ function Dashboard() {
 	const [result, setResult] = (0, import_react.useState)(null);
 	const [active, setActive] = (0, import_react.useState)(null);
 	const [persist, setPersist] = (0, import_react.useState)(false);
+	const [mihomoOk, setMihomoOk] = (0, import_react.useState)(true);
 	const sourcesRef = (0, import_react.useRef)(sources);
 	sourcesRef.current = sources;
 	(0, import_react.useEffect)(() => {
 		setSources(loadSources());
 		setSettings(loadSettings());
 		setPersist(true);
+		getProbeCaps().then((caps) => setMihomoOk(Boolean(caps.mihomo))).catch(() => setMihomoOk(false));
 	}, []);
 	(0, import_react.useEffect)(() => {
 		if (!persist) return;
@@ -620,8 +683,10 @@ function Dashboard() {
 			return scanSources({ data: {
 				sources: enabled,
 				perSource: 16,
-				globalCap: 64,
-				timeoutMs: 2200
+				globalCap: settings.realProbe ? 48 : 64,
+				timeoutMs: settings.realProbe ? 5e3 : 2200,
+				real: settings.realProbe,
+				testUrl: settings.testUrl || "https://www.youtube.com/generate_204"
 			} });
 		},
 		onSuccess: (data) => {
@@ -629,8 +694,10 @@ function Dashboard() {
 			const next = pickActive(data, settings.strategy, active?.id);
 			setActive(next);
 			const nAlive = data.nodes.filter((n) => n.alive).length;
-			if (nAlive === 0) toast.error("Живых портов не нашлось. Смените списки или повторите.");
-			else toast.success(`Пул обновлён · ${nAlive} живых из ${data.nodes.length}`);
+			if (nAlive === 0) toast.error(data.probeMode === "mihomo" ? "Ни один сервер не пропустил трафик. Смените списки или URL проверки." : "Живых портов не нашлось. Смените списки или повторите.");
+			else if (data.probeMode === "mihomo") toast.success(`Настоящая проверка · ${nAlive} серверов пропустили трафик`);
+			else toast.success(`Проверка порта · ${nAlive} открытых из ${data.nodes.length}`);
+			if (data.probeNote) toast.message(data.probeNote);
 		},
 		onError: (err) => {
 			toast.error(err instanceof Error ? err.message : "Скан не удался");
@@ -697,12 +764,29 @@ function Dashboard() {
 				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 					variant: "ghost",
 					size: "icon",
-					"aria-label": "Как это работает",
+					"aria-label": "Как пользоваться",
 					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Info, {})
 				})
-			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogContent, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogHeader, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogTitle, { children: "Как устроен Relay" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogDescription, { children: "Браузер не поднимает системный туннель. Relay — это контроллер пула: он тянет публичные списки, проверяет, какие адреса вообще отвечают, и собирает один конфиг, который сам переключает и серверы, и репозитории." })] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogContent, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogHeader, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogTitle, { children: "Как пользоваться" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogDescription, { children: "Relay не скачивается как VPN и не включает туннель в браузере. Это пульт: он проверяет списки и собирает конфиг. Подключение делает программа на компьютере." })] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
 				className: "space-y-3 text-sm text-fg-muted",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: "Hiddify умеет url-test внутри одной подписки, но не умеет бросить мёртвый репозиторий и взять другой. В YAML от Relay группа AUTO гоняет url-test по нодам, а FALLBACK ходит по источникам." }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: "Проверка здесь — TCP до порта. Это быстрый фильтр мёртвых IP, не полный handshake REALITY. Финальный отбор скорости делает уже Mihomo / Hiddify." })]
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-medium text-fg",
+						children: "1."
+					}), " Поставьте на ПК Hiddify или Clash Verge Rev."] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-medium text-fg",
+						children: "2."
+					}), " Здесь нажмите «Обновить пул»."] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-medium text-fg",
+						children: "3."
+					}), " Вкладка «Экспорт» → скачайте relay.yaml."] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-medium text-fg",
+						children: "4."
+					}), " В клиенте импортируйте файл, выберите RELAY или AUTO, подключитесь."] })
+				]
 			})] })] })]
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
 			className: "mx-auto grid w-full min-w-0 max-w-6xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start",
@@ -744,7 +828,7 @@ function Dashboard() {
 							onClick: () => scan.mutate(),
 							disabled: scan.isPending,
 							className: "h-12 w-full",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCcw, { className: scan.isPending ? "animate-spin" : "" }), scan.isPending ? "Проверяю списки" : "Обновить пул"]
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCcw, { className: scan.isPending ? "animate-spin" : "" }), scan.isPending ? settings.realProbe ? "Проверяю туннель" : "Проверяю порты" : "Обновить пул"]
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 							type: "button",
 							variant: "secondary",
@@ -759,18 +843,56 @@ function Dashboard() {
 						children: [
 							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 								className: "flex items-center justify-between gap-3",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-									className: "text-sm font-medium",
-									children: "Автообновление"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-									className: "text-xs text-fg-muted",
-									children: "каждые 3 минуты"
-								})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Switch, {
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "min-w-0",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-sm font-medium",
+										children: "Автообновление"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-xs text-fg-muted",
+										children: "каждые 3 минуты"
+									})]
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Switch, {
 									checked: settings.autoRefresh,
 									onCheckedChange: (autoRefresh) => setSettings((s) => ({
 										...s,
 										autoRefresh
 									}))
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center justify-between gap-3",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "min-w-0",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-sm font-medium",
+										children: "Настоящая проверка"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-xs text-fg-muted",
+										children: mihomoOk ? "трафик через ядро mihomo" : "ядро недоступно на этом хосте"
+									})]
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Switch, {
+									checked: settings.realProbe && mihomoOk,
+									disabled: !mihomoOk,
+									onCheckedChange: (realProbe) => setSettings((s) => ({
+										...s,
+										realProbe
+									}))
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+								className: "block space-y-1",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-xs text-fg-muted",
+									children: "URL проверки"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									value: settings.testUrl,
+									onChange: (e) => setSettings((s) => ({
+										...s,
+										testUrl: e.target.value
+									})),
+									placeholder: DEFAULT_TEST_URL,
+									className: "h-10 w-full min-w-0 rounded-md bg-bg-subtle px-3 font-mono text-xs text-fg"
 								})]
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
@@ -785,9 +907,9 @@ function Dashboard() {
 									children: strategyLabel
 								})]
 							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 								className: "text-xs leading-relaxed text-fg-subtle",
-								children: active ? `Активная: ${active.country ?? "XX"} ${active.protocol} ${formatMs(active.latency)} · ${active.sourceName}` : "Активной ноды нет — сначала сканируйте."
+								children: [result?.probeMode === "mihomo" ? "В пуле только сервера, через которые прошёл трафик." : result ? "Сейчас проверка порта: открытый порт ещё не значит, что VPN живой." : "Включите настоящую проверку и обновите пул.", active ? ` Активная: ${active.country ?? "XX"} ${active.protocol} ${formatMs(active.latency)} · ${active.sourceName}` : ""]
 							})
 						]
 					})
@@ -846,7 +968,19 @@ function Dashboard() {
 							value: "export",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ExportPanel, {
 								result,
-								sources
+								sources,
+								fmt: settings.exportFmt,
+								n: settings.exportN,
+								real: settings.realProbe && mihomoOk,
+								testUrl: settings.testUrl,
+								onFmt: (exportFmt) => setSettings((s) => ({
+									...s,
+									exportFmt
+								})),
+								onN: (exportN) => setSettings((s) => ({
+									...s,
+									exportN
+								}))
 							})
 						})
 					]

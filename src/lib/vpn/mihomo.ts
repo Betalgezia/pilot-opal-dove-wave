@@ -49,7 +49,7 @@ function uniqueName(base: string, used: Set<string>): string {
   return name;
 }
 
-function nodeClashObject(node: ParsedNode, name: string): Record<string, unknown> {
+export function clashProxyObject(node: ParsedNode, name: string): Record<string, unknown> {
   switch (node.protocol) {
     case "vless": {
       const obj: Record<string, unknown> = {
@@ -217,9 +217,10 @@ export function buildMihomoYaml(
     sourceGroupNames.push(gname);
     groupLines.push(`  - name: ${q(gname)}`);
     groupLines.push(`    type: url-test`);
-    groupLines.push(`    url: "https://www.gstatic.com/generate_204"`);
+    groupLines.push(`    url: "https://www.youtube.com/generate_204"`);
     groupLines.push(`    interval: 120`);
     groupLines.push(`    tolerance: 80`);
+    groupLines.push(`    expected-status: 204`);
     groupLines.push(`    lazy: true`);
     groupLines.push(`    proxies:`);
     for (const n of names) groupLines.push(`      - ${q(n)}`);
@@ -250,7 +251,7 @@ export function buildMihomoYaml(
   ];
 
   for (const { node, name } of named) {
-    const obj = nodeClashObject(node, name);
+    const obj = clashProxyObject(node, name);
     yaml.push(`  - name: ${q(name)}`);
     yaml.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:")));
   }
@@ -267,9 +268,10 @@ export function buildMihomoYaml(
 
   yaml.push(`  - name: ${q("AUTO")}`);
   yaml.push(`    type: url-test`);
-  yaml.push(`    url: "https://www.gstatic.com/generate_204"`);
+  yaml.push(`    url: "https://www.youtube.com/generate_204"`);
   yaml.push(`    interval: 90`);
   yaml.push(`    tolerance: 50`);
+  yaml.push(`    expected-status: 204`);
   yaml.push(`    lazy: true`);
   yaml.push(`    proxies:`);
   for (const n of allNames.length ? allNames : ["DIRECT"]) {
@@ -278,8 +280,9 @@ export function buildMihomoYaml(
 
   yaml.push(`  - name: ${q("FALLBACK")}`);
   yaml.push(`    type: fallback`);
-  yaml.push(`    url: "https://www.gstatic.com/generate_204"`);
+  yaml.push(`    url: "https://www.youtube.com/generate_204"`);
   yaml.push(`    interval: 60`);
+  yaml.push(`    expected-status: 204`);
   yaml.push(`    lazy: true`);
   yaml.push(`    proxies:`);
   const fallbackMembers = sourceGroupNames.length ? sourceGroupNames : ["AUTO"];

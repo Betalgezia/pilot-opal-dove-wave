@@ -1,45 +1,6 @@
+import { i as canRunMihomo, r as __exportAll } from "./mihomo-bin.server-BqQnOcsW.mjs";
 import net from "node:net";
-//#region node_modules/.nitro/vite/services/ssr/assets/scan.server-LM37VynH.js
-var __defProp = Object.defineProperty;
-var __exportAll = (all, no_symbols) => {
-	let target = {};
-	for (var name in all) __defProp(target, name, {
-		get: all[name],
-		enumerable: true
-	});
-	if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
-	return target;
-};
-var fetchCache = /* @__PURE__ */ new Map();
-var FETCH_TTL = 6e4;
-async function fetchSourceText(url) {
-	const hit = fetchCache.get(url);
-	if (hit && Date.now() - hit.at < FETCH_TTL) return hit.text;
-	const ctrl = new AbortController();
-	const timer = setTimeout(() => ctrl.abort(), 12e3);
-	try {
-		const res = await fetch(url, {
-			signal: ctrl.signal,
-			headers: {
-				accept: "text/plain,text/*,*/*",
-				"user-agent": "Relay/1.0 (subscription aggregator)"
-			},
-			redirect: "follow"
-		});
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		const buf = Buffer.from(await res.arrayBuffer());
-		if (buf.byteLength > 35e5) throw new Error("Список слишком большой");
-		let text = buf.toString("utf8");
-		if (text.includes("\0")) throw new Error("Бинарный файл, нужен текстовый список URI");
-		fetchCache.set(url, {
-			at: Date.now(),
-			text
-		});
-		return text;
-	} finally {
-		clearTimeout(timer);
-	}
-}
+//#region node_modules/.nitro/vite/services/ssr/assets/scan.server-DqwgDPZX.js
 var NAME_TO_CC = [
 	[/\b(netherlands|нидерланды|holland|\bnl\b)/i, "NL"],
 	[/\b(germany|германия|\bde\b|frankfurt|berlin)/i, "DE"],
@@ -504,6 +465,36 @@ function protocolRank(p) {
 		default: return 9;
 	}
 }
+var fetchCache = /* @__PURE__ */ new Map();
+var FETCH_TTL = 6e4;
+async function fetchSourceText(url) {
+	const hit = fetchCache.get(url);
+	if (hit && Date.now() - hit.at < FETCH_TTL) return hit.text;
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), 12e3);
+	try {
+		const res = await fetch(url, {
+			signal: ctrl.signal,
+			headers: {
+				accept: "text/plain,text/*,*/*",
+				"user-agent": "Relay/1.0 (subscription aggregator)"
+			},
+			redirect: "follow"
+		});
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const buf = Buffer.from(await res.arrayBuffer());
+		if (buf.byteLength > 35e5) throw new Error("Список слишком большой");
+		let text = buf.toString("utf8");
+		if (text.includes("\0")) throw new Error("Бинарный файл, нужен текстовый список URI");
+		fetchCache.set(url, {
+			at: Date.now(),
+			text
+		});
+		return text;
+	} finally {
+		clearTimeout(timer);
+	}
+}
 var cache = /* @__PURE__ */ new Map();
 var CACHE_MS = 9e4;
 function tcpPing(host, port, timeoutMs) {
@@ -625,6 +616,7 @@ async function runScan(sources, opts) {
 	const perSource = opts?.perSource ?? 16;
 	const globalCap = opts?.globalCap ?? 64;
 	const timeoutMs = opts?.timeoutMs ?? 2200;
+	const wantReal = opts?.real !== false;
 	const started = Date.now();
 	const enabled = sources.filter((s) => s.enabled);
 	const fetched = await Promise.all(enabled.map(async (source) => {
@@ -644,7 +636,27 @@ async function runScan(sources, opts) {
 	}));
 	const allNodes = fetched.flatMap((f) => f.nodes);
 	const uniqueTotal = new Set(allNodes.map(endpointKey)).size;
-	const probed = await probeNodes(sampleForProbe(allNodes, perSource, globalCap), timeoutMs);
+	const sampled = sampleForProbe(allNodes, perSource, globalCap);
+	let probeMode = "tcp";
+	let testUrl = null;
+	let probeNote = null;
+	let probed;
+	if (wantReal && canRunMihomo()) try {
+		const { probeNodesMihomo } = await import("./mihomo-probe.server-DgyvD2Lu.mjs");
+		const real = await probeNodesMihomo(sampled, opts?.testUrl || "https://www.youtube.com/generate_204");
+		probed = real.nodes;
+		probeMode = "mihomo";
+		testUrl = real.testUrl;
+		probeNote = real.note;
+	} catch (err) {
+		probed = await probeNodes(sampled, timeoutMs);
+		probeMode = "tcp";
+		probeNote = err instanceof Error ? `Настоящая проверка не стартовала: ${err.message}. Осталась проверка порта.` : "Настоящая проверка не стартовала. Осталась проверка порта.";
+	}
+	else {
+		probed = await probeNodes(sampled, timeoutMs);
+		if (wantReal) probeNote = "На этом хосте нельзя запустить ядро — проверка порта.";
+	}
 	const sourcesOut = fetched.map((f) => {
 		const mine = probed.filter((n) => n.sourceId === f.source.id);
 		const alive = mine.filter((n) => n.alive);
@@ -672,8 +684,11 @@ async function runScan(sources, opts) {
 		sources: sourcesOut,
 		nodes: probed,
 		parsedTotal: allNodes.length,
-		uniqueTotal
+		uniqueTotal,
+		probeMode,
+		testUrl,
+		probeNote
 	};
 }
 //#endregion
-export { scan_server_exports as n, runScan as t };
+export { scan_server_exports as n, endpointKey as r, runScan as t };

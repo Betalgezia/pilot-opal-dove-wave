@@ -29,7 +29,12 @@ export function pickActive(
 
 export function pickExportNodes(result: ScanResult, limit: number): ProbedNode[] {
   const alive = result.nodes.filter((n) => n.alive);
-  const pool = alive.length ? alive : result.nodes;
+  const pool =
+    result.probeMode === "mihomo"
+      ? alive
+      : alive.length
+        ? alive
+        : result.nodes;
   const bySource = new Map<string, ProbedNode[]>();
   for (const n of pool) {
     const list = bySource.get(n.sourceId) ?? [];
