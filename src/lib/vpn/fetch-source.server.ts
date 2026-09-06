@@ -1,3 +1,5 @@
+import { getActiveScanSignal } from "./scan-control.server";
+
 const fetchCache = new Map<string, { at: number; text: string }>();
 const FETCH_TTL = 60_000;
 
@@ -6,6 +8,9 @@ export async function fetchSourceText(url: string): Promise<string> {
   if (hit && Date.now() - hit.at < FETCH_TTL) return hit.text;
 
   const ctrl = new AbortController();
+  const activeSignal = getActiveScanSignal();
+  const onAbort = () => ctrl.abort();
+  activeSignal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => ctrl.abort(), 12_000);
   try {
     const res = await fetch(url, {
@@ -16,20 +21,15 @@ export async function fetchSourceText(url: string): Promise<string> {
       },
       redirect: "follow",
     });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength > 3_500_000) {
-      throw new Error("Список слишком большой");
-    }
-    let text = buf.toString("utf8");
-    if (text.includes("\u0000")) {
-      throw new Error("Бинарный файл, нужен текстовый список URI");
-    }
+    if (buf.byteLength > 3_500_000) throw new Error("Список слишком большой");
+    const text = buf.toString("utf8");
+    if (text.includes("\u0000")) throw new Error("Бинарный файл, нужен текстовый список URI");
     fetchCache.set(url, { at: Date.now(), text });
     return text;
   } finally {
     clearTimeout(timer);
+    activeSignal?.removeEventListener("abort", onAbort);
   }
 }
