@@ -11,88 +11,64 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiNetworkRouteImport } from './routes/api/network'
+import { Route as ApiScanCancelRouteImport } from './routes/api/scan/cancel'
 import { Route as ApiSubRouteImport } from './routes/api/sub'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiNetworkRoute = ApiNetworkRouteImport.update({
-  id: '/api/network',
-  path: '/api/network',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiSubRoute = ApiSubRouteImport.update({
-  id: '/api/sub',
-  path: '/api/sub',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const IndexRoute = IndexRouteImport.update({ id: '/', path: '/', getParentRoute: () => rootRouteImport } as any)
+const ApiNetworkRoute = ApiNetworkRouteImport.update({ id: '/api/network', path: '/api/network', getParentRoute: () => rootRouteImport } as any)
+const ApiScanCancelRoute = ApiScanCancelRouteImport.update({ id: '/api/scan/cancel', path: '/api/scan/cancel', getParentRoute: () => rootRouteImport } as any)
+const ApiSubRoute = ApiSubRouteImport.update({ id: '/api/sub', path: '/api/sub', getParentRoute: () => rootRouteImport } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/network': typeof ApiNetworkRoute
+  '/api/scan/cancel': typeof ApiScanCancelRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/network': typeof ApiNetworkRoute
+  '/api/scan/cancel': typeof ApiScanCancelRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/network': typeof ApiNetworkRoute
+  '/api/scan/cancel': typeof ApiScanCancelRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/network' | '/api/sub'
+  fullPaths: '/' | '/api/network' | '/api/scan/cancel' | '/api/sub'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/network' | '/api/sub'
-  id: '__root__' | '/' | '/api/network' | '/api/sub'
+  to: '/' | '/api/network' | '/api/scan/cancel' | '/api/sub'
+  id: '__root__' | '/' | '/api/network' | '/api/scan/cancel' | '/api/sub'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiNetworkRoute: typeof ApiNetworkRoute
+  ApiScanCancelRoute: typeof ApiScanCancelRoute
   ApiSubRoute: typeof ApiSubRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/network': {
-      id: '/api/network'
-      path: '/api/network'
-      fullPath: '/api/network'
-      preLoaderRoute: typeof ApiNetworkRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/sub': {
-      id: '/api/sub'
-      path: '/api/sub'
-      fullPath: '/api/sub'
-      preLoaderRoute: typeof ApiSubRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+    '/': { id: '/'; path: '/'; fullPath: '/'; preLoaderRoute: typeof IndexRouteImport; parentRoute: typeof rootRouteImport }
+    '/api/network': { id: '/api/network'; path: '/api/network'; fullPath: '/api/network'; preLoaderRoute: typeof ApiNetworkRouteImport; parentRoute: typeof rootRouteImport }
+    '/api/scan/cancel': { id: '/api/scan/cancel'; path: '/api/scan/cancel'; fullPath: '/api/scan/cancel'; preLoaderRoute: typeof ApiScanCancelRouteImport; parentRoute: typeof rootRouteImport }
+    '/api/sub': { id: '/api/sub'; path: '/api/sub'; fullPath: '/api/sub'; preLoaderRoute: typeof ApiSubRouteImport; parentRoute: typeof rootRouteImport }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  ApiNetworkRoute: ApiNetworkRoute,
-  ApiSubRoute: ApiSubRoute,
+  IndexRoute,
+  ApiNetworkRoute,
+  ApiScanCancelRoute,
+  ApiSubRoute,
 }
-export const routeTree = rootRouteImport
-  ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+export const routeTree = rootRouteImport._addFileChildren(rootRouteChildren)._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
 import type { createStart } from '@tanstack/react-start'

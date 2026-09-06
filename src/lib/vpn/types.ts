@@ -23,6 +23,7 @@ export interface ParsedNode {
   host: string;
   port: number;
   country: string | null;
+  serverIp?: string;
   sourceId: string;
   sourceName: string;
   uuid?: string;
