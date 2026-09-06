@@ -10,14 +10,7 @@ export interface SubscriptionFilters {
   blacklistEntries: string[];
 }
 
-export const PROTOCOL_OPTIONS: readonly VpnProtocol[] = [
-  "vless",
-  "vmess",
-  "ss",
-  "trojan",
-  "hysteria2",
-  "tuic",
-];
+export const PROTOCOL_OPTIONS: readonly VpnProtocol[] = ["vless", "vmess", "ss", "trojan", "hysteria2", "tuic"];
 
 export const EMPTY_FILTERS: SubscriptionFilters = {
   protocols: [],
@@ -75,45 +68,33 @@ function matchesEntries(node: ProbedNode, entries: readonly string[]): boolean {
   const hosts = candidateHosts(node).map(normalizeHost);
   return (
     hosts.some((host) => domainMatches(host, domains)) ||
+    Boolean(node.serverIp && cidrs.some((cidr) => ipInCidr(node.serverIp!, cidr))) ||
     hosts.some((host) => isIpv4(host) && cidrs.some((cidr) => ipInCidr(host, cidr)))
   );
 }
 
-export function passesSubscriptionFilters(
-  node: ProbedNode,
-  filters: SubscriptionFilters,
-): boolean {
+export function passesSubscriptionFilters(node: ProbedNode, filters: SubscriptionFilters): boolean {
   if (filters.protocols.length > 0 && !filters.protocols.includes(node.protocol)) return false;
 
   const country = (node.country ?? "").toUpperCase();
   if (filters.countryMode === "ru" && country !== "RU") return false;
-  if (filters.countryMode === "foreign" && country === "RU") return false;
-  if (filters.countryMode === "custom" && (filters.countries.length === 0 || !filters.countries.includes(country))) {
-    return false;
-  }
+  if (filters.countryMode === "foreign" && (!country || country === "RU")) return false;
+  if (filters.countryMode === "custom" && (filters.countries.length === 0 || !filters.countries.includes(country))) return false;
 
   if (filters.whitelistOnly && !matchesEntries(node, [...WHITELIST_DOMAINS, ...WHITELIST_CIDRS])) return false;
-
   if (filters.blacklistEnabled && matchesEntries(node, filters.blacklistEntries)) return false;
-
   return true;
 }
 
-export function filterSubscriptionNodes(
-  nodes: ProbedNode[],
-  filters: SubscriptionFilters,
-): ProbedNode[] {
+export function filterSubscriptionNodes(nodes: ProbedNode[], filters: SubscriptionFilters): ProbedNode[] {
   return nodes.filter((node) => node.alive && node.latency !== null && passesSubscriptionFilters(node, filters));
 }
 
 function splitEncoded(value: string | null): string[] {
   if (!value) return [];
-  return value
-    .split(",")
-    .map((x) => {
-      try { return decodeURIComponent(x).trim(); } catch { return x.trim(); }
-    })
-    .filter(Boolean);
+  return value.split(",").map((x) => {
+    try { return decodeURIComponent(x).trim(); } catch { return x.trim(); }
+  }).filter(Boolean);
 }
 
 export function filtersFromSearchParams(params: URLSearchParams): SubscriptionFilters {
@@ -124,12 +105,9 @@ export function filtersFromSearchParams(params: URLSearchParams): SubscriptionFi
   const rawCountries = splitEncoded(cc).map((x) => x.toUpperCase());
   const countries = rawCountries.filter((x) => x !== "!RU");
   const countryMode = cc === "!RU" ? "foreign" : cc === "RU" ? "ru" : countries.length ? "custom" : "all";
-  const blacklistEntries = (params.get("blx") ?? "")
-    .split("|")
-    .map((x) => {
-      try { return decodeURIComponent(x).trim().toLowerCase(); } catch { return x.trim().toLowerCase(); }
-    })
-    .filter(Boolean);
+  const blacklistEntries = (params.get("blx") ?? "").split("|").map((x) => {
+    try { return decodeURIComponent(x).trim().toLowerCase(); } catch { return x.trim().toLowerCase(); }
+  }).filter(Boolean);
 
   return {
     protocols: proto,
@@ -144,21 +122,14 @@ export function filtersFromSearchParams(params: URLSearchParams): SubscriptionFi
 export function filtersToSearchParams(params: URLSearchParams, filters: SubscriptionFilters): void {
   if (filters.protocols.length) params.set("proto", filters.protocols.join(","));
   else params.delete("proto");
-
   if (filters.countryMode === "foreign") params.set("cc", "!RU");
   else if (filters.countryMode === "ru") params.set("cc", "RU");
   else if (filters.countryMode === "custom" && filters.countries.length) params.set("cc", filters.countries.join(","));
   else params.delete("cc");
-
-  if (filters.whitelistOnly) params.set("wl", "1");
-  else params.delete("wl");
-
-  if (filters.blacklistEnabled) params.set("bl", "1");
-  else params.delete("bl");
-
+  if (filters.whitelistOnly) params.set("wl", "1"); else params.delete("wl");
+  if (filters.blacklistEnabled) params.set("bl", "1"); else params.delete("bl");
   const custom = filters.blacklistEntries.map((x) => x.trim()).filter(Boolean);
-  if (custom.length) params.set("blx", custom.map(encodeURIComponent).join("|"));
-  else params.delete("blx");
+  if (custom.length) params.set("blx", custom.map(encodeURIComponent).join("|")); else params.delete("blx");
 }
 
 export function filteredAliveCount(nodes: ProbedNode[], filters: SubscriptionFilters): number {
