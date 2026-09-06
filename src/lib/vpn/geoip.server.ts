@@ -5,6 +5,7 @@ import path from "node:path";
 const DISK_CACHE_PATH = path.join(process.cwd(), ".relay-cache", "geoip.json");
 const memoryByIp = new Map<string, string | null>();
 let diskLoaded = false;
+let persistTimer: NodeJS.Timeout | null = null;
 
 async function loadDiskCache(): Promise<void> {
   if (diskLoaded) return;
@@ -13,24 +14,29 @@ async function loadDiskCache(): Promise<void> {
     const raw = await readFile(DISK_CACHE_PATH, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     for (const [ip, country] of Object.entries(parsed)) {
-      if (country === null || typeof country === "string") {
-        memoryByIp.set(ip, country as string | null);
-      }
+      if (country === null || typeof country === "string") memoryByIp.set(ip, country as string | null);
     }
   } catch {
     /* best effort */
   }
 }
 
-async function persistCache(): Promise<void> {
-  try {
-    await mkdir(path.dirname(DISK_CACHE_PATH), { recursive: true });
-    const snapshot: Record<string, string | null> = {};
-    for (const [ip, country] of memoryByIp) snapshot[ip] = country;
-    await writeFile(DISK_CACHE_PATH, JSON.stringify(snapshot), "utf8");
-  } catch {
-    /* read-only/serverless filesystem */
-  }
+function queuePersist(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void (async () => {
+      try {
+        await mkdir(path.dirname(DISK_CACHE_PATH), { recursive: true });
+        const snapshot: Record<string, string | null> = {};
+        for (const [ip, country] of memoryByIp) snapshot[ip] = country;
+        await writeFile(DISK_CACHE_PATH, JSON.stringify(snapshot), "utf8");
+      } catch {
+        /* read-only/serverless filesystem */
+      }
+    })();
+  }, 500);
+  persistTimer.unref();
 }
 
 function isIp(value: string): boolean {
@@ -51,7 +57,7 @@ async function lookupOffline(ip: string): Promise<string | null> {
     const result = mod.default?.lookup?.(ip) ?? mod.lookup?.(ip);
     const country = typeof result?.country === "string" ? result.country.toUpperCase() : null;
     memoryByIp.set(ip, country);
-    await persistCache();
+    queuePersist();
     return country;
   } catch {
     return null;
@@ -77,9 +83,7 @@ async function enrichOne<T extends { host: string; country: string | null; serve
   return { ...node, serverIp: ip, country: geoCountry ?? node.country };
 }
 
-export async function enrichNodesWithGeoIp<
-  T extends { host: string; country: string | null; serverIp?: string },
->(nodes: T[]): Promise<T[]> {
+export async function enrichNodesWithGeoIp<T extends { host: string; country: string | null; serverIp?: string }>(nodes: T[]): Promise<T[]> {
   if (nodes.length === 0) return nodes;
   const concurrency = 32;
   const output: T[] = [];
