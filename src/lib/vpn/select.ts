@@ -1,4 +1,5 @@
 import type { ProbedNode, ScanResult, SelectStrategy } from "./types";
+import { EMPTY_FILTERS, filterSubscriptionNodes, type SubscriptionFilters } from "./subscription-filter";
 
 export function pickActive(
   result: ScanResult,
@@ -27,18 +28,20 @@ export function pickActive(
   return alive[(idx + 1) % alive.length];
 }
 
-export function pickExportNodes(result: ScanResult, limit: number): ProbedNode[] {
+export function pickExportNodes(
+  result: ScanResult,
+  limit: number,
+  filters: SubscriptionFilters = EMPTY_FILTERS,
+): ProbedNode[] {
   if (limit <= 0) return [];
 
-  const alive = result.nodes
-    .filter((n) => n.alive && n.latency !== null)
+  return [...filterSubscriptionNodes(result.nodes, filters)]
     .sort((a, b) => {
       const latency = (a.latency ?? 99999) - (b.latency ?? 99999);
       if (latency !== 0) return latency;
       return a.id.localeCompare(b.id);
-    });
-
-  return alive.slice(0, limit);
+    })
+    .slice(0, limit);
 }
 
 export function formatMs(ms: number | null | undefined): string {
