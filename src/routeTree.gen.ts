@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiNetworkRouteImport } from './routes/api/network'
 import { Route as ApiSubRouteImport } from './routes/api/sub'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNetworkRoute = ApiNetworkRouteImport.update({
+  id: '/api/network',
+  path: '/api/network',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSubRoute = ApiSubRouteImport.update({
@@ -25,27 +31,31 @@ const ApiSubRoute = ApiSubRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/network': typeof ApiNetworkRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/network': typeof ApiNetworkRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/network': typeof ApiNetworkRoute
   '/api/sub': typeof ApiSubRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/sub'
+  fullPaths: '/' | '/api/network' | '/api/sub'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/sub'
-  id: '__root__' | '/' | '/api/sub'
+  to: '/' | '/api/network' | '/api/sub'
+  id: '__root__' | '/' | '/api/network' | '/api/sub'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiNetworkRoute: typeof ApiNetworkRoute
   ApiSubRoute: typeof ApiSubRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/network': {
+      id: '/api/network'
+      path: '/api/network'
+      fullPath: '/api/network'
+      preLoaderRoute: typeof ApiNetworkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sub': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiNetworkRoute: ApiNetworkRoute,
   ApiSubRoute: ApiSubRoute,
 }
 export const routeTree = rootRouteImport
