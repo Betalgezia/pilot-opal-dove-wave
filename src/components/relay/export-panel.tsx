@@ -1,5 +1,5 @@
 import { Check, Copy, Download } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { encodeSourceParam } from "@/lib/vpn/github";
@@ -35,7 +35,34 @@ export function ExportPanel({
   onN: (n: number) => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [lanIps, setLanIps] = useState<string[]>([]);
+  const [hostMode, setHostMode] = useState<"auto" | "localhost" | "lan">("auto");
   const enabled = sources.filter((s) => s.enabled).map((s) => s.url);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/network")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("network lookup failed"))))
+      .then((data: { ipv4?: unknown }) => {
+        if (!cancelled && Array.isArray(data.ipv4)) {
+          setLanIps(data.ipv4.filter((x): x is string => typeof x === "string"));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedHost = useMemo(() => {
+    if (hostMode === "localhost") return "127.0.0.1";
+    if (hostMode === "lan") return lanIps[0] ?? (typeof window !== "undefined" ? window.location.hostname : "localhost");
+    if (typeof window === "undefined") return "localhost";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return "127.0.0.1";
+    return hostname;
+  }, [hostMode, lanIps]);
+
   const subPath = useMemo(() => {
     if (enabled.length === 0) return "";
     const params = new URLSearchParams();
@@ -77,10 +104,7 @@ export function ExportPanel({
     toast.message("Ищите relay.yaml в папке «Загрузки». Если файла нет — скопируйте YAML.");
   }
 
-  const subUrl =
-    typeof window !== "undefined" && subPath
-      ? `${window.location.origin}${subPath}`
-      : subPath;
+  const subUrl = subPath ? `${selectedHost === "localhost" ? "http://localhost:8080" : `http://${selectedHost}:8080`}${subPath}` : "";
 
   return (
     <div className="space-y-4">
@@ -91,6 +115,13 @@ export function ExportPanel({
           количество сразу вшиты в URL.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setHostMode("auto")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "auto" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>Авто</button>
+          <button type="button" onClick={() => setHostMode("localhost")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "localhost" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>localhost</button>
+          {lanIps.map((ip) => (
+            <button key={ip} type="button" onClick={() => setHostMode("lan")} className={`h-9 rounded-md px-3 font-mono text-xs ${hostMode === "lan" && selectedHost === ip ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>{ip}</button>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
           {FMT_OPTIONS.map((opt) => (
             <button
               key={opt.id}
@@ -126,6 +157,10 @@ export function ExportPanel({
         <pre className="mt-3 max-h-24 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted">
           {subUrl || "Добавьте хотя бы один источник"}
         </pre>
+        <div className="mt-1 text-xs text-fg-subtle">
+          Адрес подписки: <span className="font-mono">{selectedHost}</span>
+          {hostMode === "lan" && lanIps.length === 0 ? " · LAN IPv4 не найден" : ""}
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
