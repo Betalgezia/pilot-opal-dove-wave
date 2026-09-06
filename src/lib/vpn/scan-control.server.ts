@@ -13,6 +13,11 @@ export function endScan(controller: AbortController): void {
   activeControllers.delete(controller);
 }
 
+export function getActiveScanSignal(): AbortSignal | undefined {
+  const controllers = [...activeControllers];
+  return controllers.at(-1)?.signal;
+}
+
 export function registerMihomoChild(child: ChildProcess): void {
   activeChildren.add(child);
 }
@@ -35,7 +40,10 @@ export async function cancelActiveScan(): Promise<boolean> {
     }
   }
 
+  if (children.length === 0) return true;
+
   await new Promise<void>((resolve) => {
+    let remaining = children.length;
     const timer = setTimeout(() => {
       for (const child of children) {
         if (child.exitCode !== null) continue;
@@ -49,13 +57,6 @@ export async function cancelActiveScan(): Promise<boolean> {
     }, 2000);
     timer.unref();
 
-    if (children.length === 0) {
-      clearTimeout(timer);
-      resolve();
-      return;
-    }
-
-    let remaining = children.length;
     const done = () => {
       remaining -= 1;
       if (remaining <= 0) {
@@ -63,13 +64,13 @@ export async function cancelActiveScan(): Promise<boolean> {
         resolve();
       }
     };
+
     for (const child of children) {
-      if (child.exitCode !== null) {
-        done();
-        continue;
+      if (child.exitCode !== null) done();
+      else {
+        child.once("exit", done);
+        child.once("error", done);
       }
-      child.once("exit", done);
-      child.once("error", done);
     }
   });
 
