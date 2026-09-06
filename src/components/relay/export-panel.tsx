@@ -37,6 +37,7 @@ export function ExportPanel({
   const [copied, setCopied] = useState<string | null>(null);
   const [lanIps, setLanIps] = useState<string[]>([]);
   const [hostMode, setHostMode] = useState<"auto" | "localhost" | "lan">("auto");
+  const [selectedLanIp, setSelectedLanIp] = useState<string | null>(null);
   const enabled = sources.filter((s) => s.enabled).map((s) => s.url);
 
   useEffect(() => {
@@ -45,7 +46,9 @@ export function ExportPanel({
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("network lookup failed"))))
       .then((data: { ipv4?: unknown }) => {
         if (!cancelled && Array.isArray(data.ipv4)) {
-          setLanIps(data.ipv4.filter((x): x is string => typeof x === "string"));
+          const ips = data.ipv4.filter((x): x is string => typeof x === "string");
+          setLanIps(ips);
+          setSelectedLanIp((current) => current && ips.includes(current) ? current : (ips[0] ?? null));
         }
       })
       .catch(() => undefined);
@@ -56,12 +59,12 @@ export function ExportPanel({
 
   const selectedHost = useMemo(() => {
     if (hostMode === "localhost") return "127.0.0.1";
-    if (hostMode === "lan") return lanIps[0] ?? (typeof window !== "undefined" ? window.location.hostname : "localhost");
+    if (hostMode === "lan") return selectedLanIp ?? "127.0.0.1";
     if (typeof window === "undefined") return "localhost";
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return "127.0.0.1";
     return hostname;
-  }, [hostMode, lanIps]);
+  }, [hostMode, selectedLanIp]);
 
   const subPath = useMemo(() => {
     if (enabled.length === 0) return "";
@@ -104,7 +107,9 @@ export function ExportPanel({
     toast.message("Ищите relay.yaml в папке «Загрузки». Если файла нет — скопируйте YAML.");
   }
 
-  const subUrl = subPath ? `${selectedHost === "localhost" ? "http://localhost:8080" : `http://${selectedHost}:8080`}${subPath}` : "";
+  const subUrl = subPath
+    ? `${selectedHost === "localhost" ? "http://localhost:8080" : `http://${selectedHost}:8080`}${subPath}`
+    : "";
 
   return (
     <div className="space-y-4">
@@ -118,7 +123,17 @@ export function ExportPanel({
           <button type="button" onClick={() => setHostMode("auto")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "auto" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>Авто</button>
           <button type="button" onClick={() => setHostMode("localhost")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "localhost" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>localhost</button>
           {lanIps.map((ip) => (
-            <button key={ip} type="button" onClick={() => setHostMode("lan")} className={`h-9 rounded-md px-3 font-mono text-xs ${hostMode === "lan" && selectedHost === ip ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>{ip}</button>
+            <button
+              key={ip}
+              type="button"
+              onClick={() => {
+                setSelectedLanIp(ip);
+                setHostMode("lan");
+              }}
+              className={`h-9 rounded-md px-3 font-mono text-xs ${hostMode === "lan" && selectedLanIp === ip ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}
+            >
+              {ip}
+            </button>
           ))}
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -159,7 +174,7 @@ export function ExportPanel({
         </pre>
         <div className="mt-1 text-xs text-fg-subtle">
           Адрес подписки: <span className="font-mono">{selectedHost}</span>
-          {hostMode === "lan" && lanIps.length === 0 ? " · LAN IPv4 не найден" : ""}
+          {hostMode === "lan" && !selectedLanIp ? " · LAN IPv4 не найден" : ""}
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
