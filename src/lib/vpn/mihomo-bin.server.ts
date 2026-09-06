@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { inflateRawSync } from "node:zlib";
+import { createGunzip, inflateRawSync } from "node:zlib";
 import { MIHOMO_VERSION } from "./constants";
 
 const CACHE_DIR = path.join(tmpdir(), "relay-mihomo");
@@ -61,12 +61,22 @@ async function exists(file: string): Promise<boolean> {
 
 function runVersion(bin: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(ok);
+    };
+
     const child = spawn(bin, ["-v"], {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: process.platform === "win32",
     });
-    let settled = false;
-    const timer = setTimeout(() => {
+    child.on("error", () => done(false));
+    child.on("exit", (code) => done(code === 0));
+    timer = setTimeout(() => {
       try {
         child.kill();
       } catch {
@@ -75,16 +85,6 @@ function runVersion(bin: string): Promise<boolean> {
       done(false);
     }, 4000);
     timer.unref();
-
-    const done = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(ok);
-    };
-
-    child.on("error", () => done(false));
-    child.on("exit", (code) => done(code === 0));
   });
 }
 
@@ -190,8 +190,7 @@ async function installBinary(): Promise<string> {
   } else {
     await pipeline(
       Readable.fromWeb(res.body as import("node:stream/web").ReadableStream),
-      // Unix release assets are gzip-compressed single binaries.
-      (await import("node:zlib")).createGunzip(),
+      createGunzip(),
       createWriteStream(tmpPath),
     );
   }
