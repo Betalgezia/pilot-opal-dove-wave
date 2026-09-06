@@ -107,11 +107,12 @@ export function Dashboard() {
       return scanSources({
         data: {
           sources: enabled,
-          perSource: 16,
-          globalCap: settings.realProbe ? 48 : 64,
-          timeoutMs: settings.realProbe ? 5000 : 2200,
+          perSource: 3000,
+          globalCap: 20000,
+          timeoutMs: settings.realProbe ? 6000 : 2200,
           real: settings.realProbe,
           testUrl: settings.testUrl || DEFAULT_TEST_URL,
+          force: true,
         },
       });
     },
@@ -393,7 +394,9 @@ export function Dashboard() {
                 n={settings.exportN}
                 real={settings.realProbe && mihomoOk}
                 testUrl={settings.testUrl}
-                onFmt={(exportFmt) => setSettings((s) => ({ ...s, exportFmt }))}
+                onFmt={(exportFmt) =>
+                  setSettings((s) => ({ ...s, exportFmt }))
+                }
                 onN={(exportN) => setSettings((s) => ({ ...s, exportN }))}
               />
             </TabsContent>
@@ -406,9 +409,11 @@ export function Dashboard() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-surface px-1 py-3 shadow-border sm:px-2">
-      <p className="truncate font-mono text-sm tabular-nums">{value}</p>
-      <p className="truncate text-xs text-fg-muted">{label}</p>
+    <div className="rounded-lg bg-surface px-2 py-3 shadow-border">
+      <p className="font-mono text-sm">{value}</p>
+      <p className="mt-1 text-[10px] uppercase tracking-wider text-fg-subtle">
+        {label}
+      </p>
     </div>
   );
 }
