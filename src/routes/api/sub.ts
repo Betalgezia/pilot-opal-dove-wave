@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N } from "@/lib/vpn/constants";
 import { decodeSourceParam } from "@/lib/vpn/github";
 import { buildB64Subscription, buildMihomoYaml, buildUriList } from "@/lib/vpn/mihomo";
-import { pickExportNodes } from "@/lib/vpn/scan.server";
-import { runScanCached } from "@/lib/vpn/scan.server";
+import { filtersFromSearchParams } from "@/lib/vpn/subscription-filter";
+import { pickExportNodes, runScanCached } from "@/lib/vpn/scan.server";
 
 function cors(headers: Headers) {
   headers.set("access-control-allow-origin", "*");
@@ -30,12 +30,13 @@ export const Route = createFileRoute("/api/sub")({
         );
         const real = url.searchParams.get("real") !== "0";
         const testUrl = url.searchParams.get("test") || undefined;
+        const filters = filtersFromSearchParams(url.searchParams);
         const urls = decodeSourceParam(packed);
         if (urls.length === 0) {
           const headers = new Headers({ "content-type": "text/plain; charset=utf-8" });
           cors(headers);
           return new Response(
-            "Relay subscription\nPass ?u=<encoded sources>&fmt=b64|clash|uri&n=40&real=1\n",
+            "Relay subscription\nPass ?u=<encoded sources>&fmt=b64|clash|uri&n=40&real=1&proto=vless,vmess&cc=RU&wl=1&bl=1\n",
             { status: 400, headers },
           );
         }
@@ -53,17 +54,15 @@ export const Route = createFileRoute("/api/sub")({
           real,
           testUrl,
         });
-        const nodes = pickExportNodes(result, limit);
+        const nodes = pickExportNodes(result, limit, filters);
         const headers = new Headers();
         cors(headers);
         headers.set("cache-control", "public, max-age=60");
         headers.set("profile-update-interval", "1");
         headers.set("profile-title", "Relay");
         headers.set("x-relay-probe", result.probeMode);
-        headers.set(
-          "x-relay-alive",
-          String(result.nodes.filter((n) => n.alive).length),
-        );
+        headers.set("x-relay-alive", String(result.nodes.filter((node) => node.alive).length));
+        headers.set("x-relay-filtered", String(nodes.length));
         headers.set("x-relay-scanned-at", String(result.scannedAt));
 
         if (fmt === "uri") {
