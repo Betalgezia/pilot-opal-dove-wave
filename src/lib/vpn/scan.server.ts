@@ -15,6 +15,51 @@ export interface ScanOpts {
   timeoutMs?: number;
   real?: boolean;
   testUrl?: string;
+  force?: boolean;
+}
+
+const SCAN_CACHE_MS = 180_000;
+const scanCache = new Map<string, { at: number; result: ScanResult }>();
+const scanLocks = new Map<string, Promise<ScanResult>>();
+
+function scanKey(sources: SourceDef[], opts: ScanOpts): string {
+  return JSON.stringify({
+    sources: sources
+      .filter((s) => s.enabled)
+      .map((s) => ({ id: s.id, name: s.name, url: s.url }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    perSource: opts.perSource ?? 16,
+    globalCap: opts.globalCap ?? 64,
+    timeoutMs: opts.timeoutMs ?? 2200,
+    real: opts.real !== false,
+    testUrl: opts.testUrl || DEFAULT_TEST_URL,
+  });
+}
+
+export async function runScanCached(
+  sources: SourceDef[],
+  opts: ScanOpts = {},
+): Promise<ScanResult> {
+  const key = scanKey(sources, opts);
+  const now = Date.now();
+  const cached = scanCache.get(key);
+  if (!opts.force && cached && now - cached.at < SCAN_CACHE_MS) {
+    return cached.result;
+  }
+
+  const pending = scanLocks.get(key);
+  if (pending) return pending;
+
+  const promise = runScan(sources, opts).then((result) => {
+    scanCache.set(key, { at: Date.now(), result });
+    return result;
+  });
+  scanLocks.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (scanLocks.get(key) === promise) scanLocks.delete(key);
+  }
 }
 
 export async function runScan(

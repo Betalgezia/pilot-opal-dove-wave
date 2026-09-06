@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N } from "@/lib/vpn/constants";
 import { decodeSourceParam } from "@/lib/vpn/github";
 import { buildB64Subscription, buildMihomoYaml, buildUriList } from "@/lib/vpn/mihomo";
-import { pickExportNodes, runScan } from "@/lib/vpn/scan.server";
+import { pickExportNodes } from "@/lib/vpn/scan.server";
+import { runScanCached } from "@/lib/vpn/scan.server";
 
 function cors(headers: Headers) {
   headers.set("access-control-allow-origin", "*");
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/api/sub")({
         const fmtRaw = (url.searchParams.get("fmt") ?? DEFAULT_EXPORT_FMT).toLowerCase();
         const fmt = fmtRaw === "clash" || fmtRaw === "uri" ? fmtRaw : "b64";
         const limit = Math.min(
-          80,
+          60,
           Math.max(4, Number(url.searchParams.get("n") || DEFAULT_EXPORT_N) || DEFAULT_EXPORT_N),
         );
         const real = url.searchParams.get("real") !== "0";
@@ -45,10 +46,10 @@ export const Route = createFileRoute("/api/sub")({
           url: u,
           enabled: true,
         }));
-        const result = await runScan(sources, {
-          perSource: 14,
-          globalCap: Math.min(64, Math.max(24, limit)),
-          timeoutMs: 2000,
+        const result = await runScanCached(sources, {
+          perSource: 3000,
+          globalCap: 20000,
+          timeoutMs: 6000,
           real,
           testUrl,
         });
@@ -63,6 +64,7 @@ export const Route = createFileRoute("/api/sub")({
           "x-relay-alive",
           String(result.nodes.filter((n) => n.alive).length),
         );
+        headers.set("x-relay-scanned-at", String(result.scannedAt));
 
         if (fmt === "uri") {
           headers.set("content-type", "text/plain; charset=utf-8");

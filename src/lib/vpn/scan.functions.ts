@@ -12,21 +12,23 @@ export const scanSources = createServerFn({ method: "POST" })
   .validator(
     z.object({
       sources: z.array(sourceSchema).min(1).max(16),
-      perSource: z.number().min(4).max(32).optional(),
-      globalCap: z.number().min(8).max(80).optional(),
+      perSource: z.number().min(4).max(5000).optional(),
+      globalCap: z.number().min(8).max(20000).optional(),
       timeoutMs: z.number().min(800).max(8000).optional(),
       real: z.boolean().optional(),
       testUrl: z.string().max(300).optional(),
+      force: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }) => {
-    const { runScan } = await import("./scan.server");
-    return runScan(data.sources, {
+    const { runScanCached } = await import("./scan.server");
+    return runScanCached(data.sources, {
       perSource: data.perSource,
       globalCap: data.globalCap,
       timeoutMs: data.timeoutMs,
       real: data.real,
       testUrl: data.testUrl,
+      force: data.force,
     });
   });
 
