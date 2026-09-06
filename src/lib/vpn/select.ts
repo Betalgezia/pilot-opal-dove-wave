@@ -28,35 +28,17 @@ export function pickActive(
 }
 
 export function pickExportNodes(result: ScanResult, limit: number): ProbedNode[] {
-  const alive = result.nodes.filter((n) => n.alive);
-  const pool =
-    result.probeMode === "mihomo"
-      ? alive
-      : alive.length
-        ? alive
-        : result.nodes;
-  const bySource = new Map<string, ProbedNode[]>();
-  for (const n of pool) {
-    const list = bySource.get(n.sourceId) ?? [];
-    list.push(n);
-    bySource.set(n.sourceId, list);
-  }
-  const out: ProbedNode[] = [];
-  const ids = [...bySource.keys()];
-  let i = 0;
-  while (out.length < limit) {
-    let added = false;
-    for (const id of ids) {
-      const bucket = bySource.get(id);
-      if (!bucket || i >= bucket.length) continue;
-      out.push(bucket[i]);
-      added = true;
-      if (out.length >= limit) break;
-    }
-    if (!added) break;
-    i += 1;
-  }
-  return out;
+  if (limit <= 0) return [];
+
+  const alive = result.nodes
+    .filter((n) => n.alive && n.latency !== null)
+    .sort((a, b) => {
+      const latency = (a.latency ?? 99999) - (b.latency ?? 99999);
+      if (latency !== 0) return latency;
+      return a.id.localeCompare(b.id);
+    });
+
+  return alive.slice(0, limit);
 }
 
 export function formatMs(ms: number | null | undefined): string {
