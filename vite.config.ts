@@ -97,13 +97,11 @@ function autoOpenBrowserPlugin(): Plugin {
   const open = (port: number) => {
     if (opened || isServerlessHost(process.env) || process.env.RELAY_NO_OPEN === "1") return;
     opened = true;
-    const url = `http://localhost:${port}`;
-    setTimeout(() => openLocalBrowser(url), 150);
+    setTimeout(() => openLocalBrowser(`http://localhost:${port}`), 150);
   };
 
   return {
     name: "relay:auto-open-browser",
-    apply: "serve",
     configureServer(server) {
       server.httpServer?.once("listening", () => open(server.config.server.port ?? 8080));
     },
@@ -125,9 +123,7 @@ export default defineConfig(({ command, isPreview }) => ({
     grokPwaPlugin(),
     tailwindcss(),
     tanstackStart(),
-    ...(command === "build" || isPreview
-      ? [nitro({ preset: "vercel", serverDir: "./server" })]
-      : []),
+    ...(command === "build" || isPreview ? [nitro({ preset: "vercel", serverDir: "./server" })] : []),
     viteReact(),
   ],
 }));
