@@ -168,22 +168,39 @@ async function waitApi(port: number, timeoutMs: number): Promise<void> {
   throw new Error("Ядро mihomo не подняло API");
 }
 
-function killChild(child: ChildProcess) {
-  if (child.killed || child.exitCode !== null) return;
-  try {
-    child.kill("SIGTERM");
-  } catch {
-    /* ignore */
-  }
-  setTimeout(() => {
-    if (child.exitCode === null && !child.killed) {
+async function killChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceTimer);
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+      resolve();
+    };
+    const onExit = () => finish();
+    const onError = () => finish();
+    const forceTimer = setTimeout(() => {
       try {
         child.kill("SIGKILL");
       } catch {
         /* ignore */
       }
+      setTimeout(finish, 200).unref();
+    }, 1200);
+    forceTimer.unref();
+
+    child.once("exit", onExit);
+    child.once("error", onError);
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      finish();
     }
-  }, 1200).unref();
+  });
 }
 
 function isAliveDelay(delay: unknown): delay is number {
@@ -260,6 +277,7 @@ async function runOnce(
   const child = spawn(bin, ["-d", dir, "-f", configPath], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, SKIP_SYSTEM_PROXY: "1" },
+    windowsHide: process.platform === "win32",
   });
   child.stderr?.on("data", (buf: Buffer) => {
     if (stderr.length < 4000) stderr += buf.toString("utf8");
@@ -291,8 +309,7 @@ async function runOnce(
     }
     return delays;
   } finally {
-    killChild(child);
-    await sleep(200);
+    await killChild(child);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
