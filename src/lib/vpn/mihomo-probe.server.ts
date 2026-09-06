@@ -6,6 +6,7 @@ import path from "node:path";
 import { DEFAULT_TEST_URL, FALLBACK_TEST_URL } from "./constants";
 import { ensureMihomoBinary, canRunMihomo } from "./mihomo-bin.server";
 import { clashProxyObject } from "./mihomo";
+import { registerMihomoChild, unregisterMihomoChild } from "./scan-control.server";
 import { endpointKey } from "./parse";
 import type { ParsedNode, ProbedNode } from "./types";
 
@@ -16,16 +17,11 @@ let lock: Promise<unknown> = Promise.resolve();
 
 function withLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = lock.then(fn, fn);
-  lock = run.then(
-    () => undefined,
-    () => undefined,
-  );
+  lock = run.then(() => undefined, () => undefined);
   return run;
 }
 
-function q(value: string): string {
-  return JSON.stringify(value);
-}
+function q(value: string): string { return JSON.stringify(value); }
 
 function indent(obj: Record<string, unknown>, level = 4): string[] {
   const pad = " ".repeat(level);
@@ -35,9 +31,7 @@ function indent(obj: Record<string, unknown>, level = 4): string[] {
     if (Array.isArray(v)) {
       if (v.length === 0) continue;
       if (v.every((x) => typeof x === "string" || typeof x === "number")) {
-        lines.push(
-          `${pad}${k}: [${v.map((x) => (typeof x === "string" ? q(x) : x)).join(", ")}]`,
-        );
+        lines.push(`${pad}${k}: [${v.map((x) => (typeof x === "string" ? q(x) : x)).join(", ")}]`);
       } else {
         lines.push(`${pad}${k}:`);
         for (const item of v) {
@@ -68,21 +62,15 @@ function usable(node: ParsedNode): boolean {
   switch (node.protocol) {
     case "vless":
     case "vmess":
-    case "tuic":
-      return Boolean(node.uuid);
-    case "ss":
-      return Boolean(node.password && node.method);
+    case "tuic": return Boolean(node.uuid);
+    case "ss": return Boolean(node.password && node.method);
     case "trojan":
-    case "hysteria2":
-      return Boolean(node.password);
-    default:
-      return false;
+    case "hysteria2": return Boolean(node.password);
+    default: return false;
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -128,27 +116,14 @@ function buildProbeYaml(
   ];
   for (const { node, name } of named) {
     const obj = clashProxyObject(node, name);
-    if (obj.tls === true && obj["skip-cert-verify"] === undefined) {
-      obj["skip-cert-verify"] = true;
-    }
+    if (obj.tls === true && obj["skip-cert-verify"] === undefined) obj["skip-cert-verify"] = true;
     lines.push(`  - name: ${q(name)}`);
     lines.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:")));
   }
-  lines.push(``);
-  lines.push(`proxy-groups:`);
-  lines.push(`  - name: "RELAYTEST"`);
-  lines.push(`    type: url-test`);
-  lines.push(`    url: ${q(testUrl)}`);
-  lines.push(`    interval: 86400`);
-  lines.push(`    lazy: false`);
-  lines.push(`    timeout: 4000`);
-  lines.push(`    expected-status: 204`);
-  lines.push(`    proxies:`);
+  lines.push(``, `proxy-groups:`, `  - name: "RELAYTEST"`, `    type: url-test`, `    url: ${q(testUrl)}`,
+    `    interval: 86400`, `    lazy: false`, `    timeout: 4000`, `    expected-status: 204`, `    proxies:`);
   for (const { name } of named) lines.push(`      - ${q(name)}`);
-  lines.push(``);
-  lines.push(`rules:`);
-  lines.push(`  - MATCH,RELAYTEST`);
-  lines.push(``);
+  lines.push(``, `rules:`, `  - MATCH,RELAYTEST`, ``);
   return lines.join("\n");
 }
 
@@ -156,13 +131,9 @@ async function waitApi(port: number, timeoutMs: number): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/version`, {
-        signal: AbortSignal.timeout(400),
-      });
+      const res = await fetch(`http://127.0.0.1:${port}/version`, { signal: AbortSignal.timeout(400) });
       if (res.ok) return;
-    } catch {
-      /* retry */
-    }
+    } catch { /* retry */ }
     await sleep(120);
   }
   throw new Error("Ядро mihomo не подняло API");
@@ -170,7 +141,6 @@ async function waitApi(port: number, timeoutMs: number): Promise<void> {
 
 async function killChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return;
-
   await new Promise<void>((resolve) => {
     let settled = false;
     const finish = () => {
@@ -184,22 +154,13 @@ async function killChild(child: ChildProcess): Promise<void> {
     const onExit = () => finish();
     const onError = () => finish();
     const forceTimer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
       setTimeout(finish, 200).unref();
     }, 1200);
     forceTimer.unref();
-
     child.once("exit", onExit);
     child.once("error", onError);
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      finish();
-    }
+    try { child.kill("SIGTERM"); } catch { finish(); }
   });
 }
 
@@ -207,57 +168,35 @@ function isAliveDelay(delay: unknown): delay is number {
   return typeof delay === "number" && delay > 0 && delay < 65535;
 }
 
-async function groupDelays(
-  apiPort: number,
-  testUrl: string,
-  timeoutMs: number,
-): Promise<Record<string, number>> {
+async function groupDelays(apiPort: number, testUrl: string, timeoutMs: number): Promise<Record<string, number>> {
   const url = new URL(`http://127.0.0.1:${apiPort}/group/RELAYTEST/delay`);
   url.searchParams.set("url", testUrl);
   url.searchParams.set("timeout", String(timeoutMs));
   url.searchParams.set("expected", "204");
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs + 20_000) });
-  if (!res.ok) {
-    throw new Error(`healthcheck ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`healthcheck ${res.status}`);
   const data = (await res.json()) as Record<string, unknown>;
   const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(data)) {
-    if (typeof v === "number") out[k] = v;
-  }
+  for (const [k, v] of Object.entries(data)) if (typeof v === "number") out[k] = v;
   return out;
 }
 
-async function proxyHistories(
-  apiPort: number,
-): Promise<Record<string, number>> {
+async function proxyHistories(apiPort: number): Promise<Record<string, number>> {
   try {
-    const res = await fetch(`http://127.0.0.1:${apiPort}/proxies`, {
-      signal: AbortSignal.timeout(8000),
-    });
+    const res = await fetch(`http://127.0.0.1:${apiPort}/proxies`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return {};
-    const data = (await res.json()) as {
-      proxies?: Record<string, { history?: Array<{ delay?: number }> }>;
-    };
+    const data = (await res.json()) as { proxies?: Record<string, { history?: Array<{ delay?: number }> }> };
     const out: Record<string, number> = {};
     for (const [name, proxy] of Object.entries(data.proxies ?? {})) {
       const last = proxy.history?.at(-1)?.delay;
       if (typeof last === "number") out[name] = last;
     }
     return out;
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
-async function runOnce(
-  nodes: ParsedNode[],
-  testUrl: string,
-): Promise<Map<string, number | null>> {
-  const named = nodes.filter(usable).map((node, i) => ({
-    node,
-    name: `n${String(i + 1).padStart(3, "0")}`,
-  }));
+async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string, number | null>> {
+  const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` }));
   const delays = new Map<string, number | null>();
   for (const node of nodes) delays.set(endpointKey(node), null);
   if (named.length === 0) return delays;
@@ -267,11 +206,7 @@ async function runOnce(
   const mixedPort = await freePort();
   const dir = await mkdtemp(path.join(tmpdir(), "relay-probe-"));
   const configPath = path.join(dir, "config.yaml");
-  await writeFile(
-    configPath,
-    buildProbeYaml(named, testUrl, apiPort, mixedPort),
-    "utf8",
-  );
+  await writeFile(configPath, buildProbeYaml(named, testUrl, apiPort, mixedPort), "utf8");
 
   let stderr = "";
   const child = spawn(bin, ["-d", dir, "-f", configPath], {
@@ -279,29 +214,20 @@ async function runOnce(
     env: { ...process.env, SKIP_SYSTEM_PROXY: "1" },
     windowsHide: process.platform === "win32",
   });
+  registerMihomoChild(child);
   child.stderr?.on("data", (buf: Buffer) => {
     if (stderr.length < 4000) stderr += buf.toString("utf8");
   });
 
   try {
     const died = new Promise<never>((_, reject) => {
-      child.on("exit", (code) => {
-        reject(
-          new Error(
-            `mihomo вышел (${code ?? "?"})${stderr.trim() ? `: ${stderr.trim().slice(0, 280)}` : ""}`,
-          ),
-        );
-      });
+      child.on("exit", (code) => reject(new Error(`mihomo вышел (${code ?? "?"})${stderr.trim() ? `: ${stderr.trim().slice(0, 280)}` : ""}`)));
       child.on("error", reject);
     });
     await Promise.race([waitApi(apiPort, 8000), died]);
 
     let measured: Record<string, number> = {};
-    try {
-      measured = await groupDelays(apiPort, testUrl, 5000);
-    } catch {
-      measured = {};
-    }
+    try { measured = await groupDelays(apiPort, testUrl, 5000); } catch { measured = {}; }
     const history = await proxyHistories(apiPort);
     for (const { node, name } of named) {
       const delay = measured[name] ?? history[name];
@@ -309,6 +235,7 @@ async function runOnce(
     }
     return delays;
   } finally {
+    unregisterMihomoChild(child);
     await killChild(child);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -318,9 +245,7 @@ export async function probeNodesMihomo(
   nodes: ParsedNode[],
   testUrl = DEFAULT_TEST_URL,
 ): Promise<{ nodes: ProbedNode[]; testUrl: string; note: string | null }> {
-  if (!canRunMihomo()) {
-    throw new Error("mihomo недоступен");
-  }
+  if (!canRunMihomo()) throw new Error("mihomo недоступен");
   return withLock(async () => {
     const now = Date.now();
     const fresh: ParsedNode[] = [];
@@ -347,16 +272,8 @@ export async function probeNodesMihomo(
       const stamp = Date.now();
       for (const node of fresh) {
         const latency = measured.get(endpointKey(node)) ?? null;
-        cache.set(`${urlUsed}|${endpointKey(node)}`, {
-          at: stamp,
-          latency,
-          url: urlUsed,
-        });
-        cache.set(`${testUrl}|${endpointKey(node)}`, {
-          at: stamp,
-          latency,
-          url: urlUsed,
-        });
+        cache.set(`${urlUsed}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
+        cache.set(`${testUrl}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
       }
     }
 
