@@ -1,12 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_TEST_URL } from "./constants";
 import type { SubscriptionFilters } from "./subscription-filter";
 
 export interface PanelFilters extends SubscriptionFilters {
   testUrl: string;
 }
 
-const DEFAULT_TEST_URL = "https://www.youtube.com/generate_204";
 const FILTERS_PATH = path.join(process.cwd(), ".relay", "filters.json");
 
 export const DEFAULT_PANEL_FILTERS: PanelFilters = {
@@ -36,10 +36,7 @@ function normalize(input: unknown): PanelFilters {
     whitelistOnly: value.whitelistOnly === true,
     blacklistEnabled: value.blacklistEnabled === true,
     blacklistEntries: Array.isArray(value.blacklistEntries)
-      ? value.blacklistEntries
-          .filter((x): x is string => typeof x === "string")
-          .map((x) => x.trim().toLowerCase())
-          .filter(Boolean)
+      ? value.blacklistEntries.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter(Boolean)
       : [],
     testUrl: typeof value.testUrl === "string" && value.testUrl.trim() ? value.testUrl.trim() : DEFAULT_TEST_URL,
   };
