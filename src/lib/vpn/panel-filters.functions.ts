@@ -4,7 +4,7 @@ import type { PanelFilters } from "./panel-filters.server";
 import { PROTOCOL_OPTIONS } from "./subscription-filter";
 
 const filtersSchema = z.object({
-  protocols: z.array(z.enum(PROTOCOL_OPTIONS as [string, ...string[]])).max(PROTOCOL_OPTIONS.length),
+  protocols: z.array(z.enum(PROTOCOL_OPTIONS)).max(PROTOCOL_OPTIONS.length),
   countryMode: z.enum(["all", "ru", "foreign", "custom"]),
   countries: z.array(z.string().min(2).max(8)).max(256),
   whitelistOnly: z.boolean(),
