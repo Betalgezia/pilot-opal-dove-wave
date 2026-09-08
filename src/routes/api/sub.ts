@@ -1,14 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N } from "@/lib/vpn/constants";
+import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N, DEFAULT_SCAN_STRATEGY } from "@/lib/vpn/constants";
 import { decodeSourceParam } from "@/lib/vpn/github";
 import { buildB64Subscription, buildMihomoYaml, buildUriList } from "@/lib/vpn/mihomo";
 import { filtersFromSearchParams } from "@/lib/vpn/subscription-filter";
-import { pickExportNodes, runScanCached } from "@/lib/vpn/scan.server";
+import { getLastScanResult, pickExportNodes, runScanCached } from "@/lib/vpn/scan.server";
+import type { ScanStrategy } from "@/lib/vpn/types";
 
 function cors(headers: Headers) {
   headers.set("access-control-allow-origin", "*");
   headers.set("access-control-allow-methods", "GET, OPTIONS");
   headers.set("access-control-allow-headers", "*");
+}
+
+function parseScanStrategy(raw: string | null): ScanStrategy {
+  if (raw === "batches" || raw === "groups") return raw;
+  return DEFAULT_SCAN_STRATEGY;
 }
 
 export const Route = createFileRoute("/api/sub")({
@@ -30,13 +36,16 @@ export const Route = createFileRoute("/api/sub")({
         );
         const real = url.searchParams.get("real") !== "0";
         const testUrl = url.searchParams.get("test") || undefined;
+        const scanStrategy = parseScanStrategy(url.searchParams.get("sm"));
+        const idle = url.searchParams.get("idle") === "1";
+        const geoip = url.searchParams.get("geoip") !== "0";
         const filters = filtersFromSearchParams(url.searchParams);
         const urls = decodeSourceParam(packed);
         if (urls.length === 0) {
           const headers = new Headers({ "content-type": "text/plain; charset=utf-8" });
           cors(headers);
           return new Response(
-            "Relay subscription\nPass ?u=<encoded sources>&fmt=b64|clash|uri&n=40&real=1&proto=vless,vmess&cc=RU&wl=1&bl=1\n",
+            "Relay subscription\nPass ?u=<encoded sources>&fmt=b64|clash|uri&n=40&real=1&sm=full|batches|groups&idle=0&proto=vless,vmess&cc=RU&wl=1&bl=1\n",
             { status: 400, headers },
           );
         }
@@ -47,13 +56,27 @@ export const Route = createFileRoute("/api/sub")({
           url: u,
           enabled: true,
         }));
-        const result = await runScanCached(sources, {
-          perSource: 3000,
-          globalCap: 20000,
-          timeoutMs: 6000,
-          real,
-          testUrl,
-        });
+
+        let result = idle ? getLastScanResult() : null;
+        if (!result) {
+          if (idle) {
+            const headers = new Headers({ "content-type": "text/plain; charset=utf-8" });
+            cors(headers);
+            return new Response(
+              "Нет готового пула. Сначала нажмите «Сканировать» в панели Relay.\n",
+              { status: 503, headers },
+            );
+          }
+          result = await runScanCached(sources, {
+            perSource: 3000,
+            globalCap: 20000,
+            timeoutMs: 6000,
+            real,
+            testUrl,
+            scanStrategy,
+            geoip,
+          });
+        }
         const nodes = pickExportNodes(result, limit, filters);
         const headers = new Headers();
         cors(headers);
@@ -61,6 +84,8 @@ export const Route = createFileRoute("/api/sub")({
         headers.set("profile-update-interval", "1");
         headers.set("profile-title", "Relay");
         headers.set("x-relay-probe", result.probeMode);
+        headers.set("x-relay-strategy", result.scanStrategy ?? scanStrategy);
+        headers.set("x-relay-idle", idle ? "1" : "0");
         headers.set("x-relay-alive", String(result.nodes.filter((node) => node.alive).length));
         headers.set("x-relay-filtered", String(nodes.length));
         headers.set("x-relay-scanned-at", String(result.scannedAt));

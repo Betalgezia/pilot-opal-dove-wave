@@ -8,6 +8,8 @@ const sourceSchema = z.object({
   enabled: z.boolean(),
 });
 
+const scanStrategySchema = z.enum(["full", "batches", "groups"]);
+
 export const scanSources = createServerFn({ method: "POST" })
   .validator(
     z.object({
@@ -18,6 +20,8 @@ export const scanSources = createServerFn({ method: "POST" })
       real: z.boolean().optional(),
       testUrl: z.string().max(300).optional(),
       force: z.boolean().optional(),
+      scanStrategy: scanStrategySchema.optional(),
+      geoip: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -29,10 +33,12 @@ export const scanSources = createServerFn({ method: "POST" })
       real: data.real,
       testUrl: data.testUrl,
       force: data.force,
+      scanStrategy: data.scanStrategy,
+      geoip: data.geoip,
     });
   });
 
 export const getProbeCaps = createServerFn({ method: "GET" }).handler(async () => {
-  const { canRunMihomo } = await import("./mihomo-bin.server");
-  return { mihomo: canRunMihomo() };
+  const { canRunMihomo, mihomoInstallDir } = await import("./mihomo-bin.server");
+  return { mihomo: canRunMihomo(), installDir: mihomoInstallDir() };
 });

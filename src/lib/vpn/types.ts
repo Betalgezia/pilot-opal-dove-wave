@@ -7,6 +7,10 @@ export type VpnProtocol =
   | "tuic";
 
 export type SourceStatus = "idle" | "ok" | "dead" | "error";
+export type ExportFormat = "clash" | "uri" | "b64";
+export type SelectStrategy = "fastest" | "fallback" | "balanced";
+export type ProbeMode = "mihomo" | "tcp";
+export type ScanStrategy = "full" | "batches" | "groups";
 
 export interface SourceDef {
   id: string;
@@ -73,8 +77,5 @@ export interface ScanResult {
   probeMode: ProbeMode;
   testUrl: string | null;
   probeNote: string | null;
+  scanStrategy?: ScanStrategy;
 }
-
-export type ExportFormat = "clash" | "uri" | "b64";
-export type SelectStrategy = "fastest" | "fallback" | "balanced";
-export type ProbeMode = "mihomo" | "tcp";

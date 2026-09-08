@@ -1,11 +1,17 @@
 import { promises as dns } from "node:dns";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { abortError } from "./abort";
+import { getActiveScanSignal } from "./scan-control.server";
 
 const DISK_CACHE_PATH = path.join(process.cwd(), ".relay-cache", "geoip.json");
 const memoryByIp = new Map<string, string | null>();
 let diskLoaded = false;
 let persistTimer: NodeJS.Timeout | null = null;
+
+function throwIfCancelled(): void {
+  if (getActiveScanSignal()?.aborted) throw abortError();
+}
 
 async function loadDiskCache(): Promise<void> {
   if (diskLoaded) return;
@@ -65,13 +71,38 @@ async function lookupOffline(ip: string): Promise<string | null> {
 }
 
 async function resolveIp(host: string): Promise<string | null> {
+  throwIfCancelled();
   const normalized = host.trim().replace(/^\[|\]$/g, "");
   if (!normalized) return null;
   if (isIp(normalized)) return normalized;
   try {
-    const records = await dns.lookup(normalized, { all: true, verbatim: true });
+    const lookup = dns.lookup(normalized, { all: true, verbatim: true });
+    const signal = getActiveScanSignal();
+    if (!signal) {
+      const records = await lookup;
+      return records[0]?.address ?? null;
+    }
+    const records = await new Promise<Awaited<typeof lookup>>((resolve, reject) => {
+      const onAbort = () => reject(abortError());
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+      lookup.then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (err) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
     return records[0]?.address ?? null;
   } catch {
+    if (getActiveScanSignal()?.aborted) throw abortError();
     return null;
   }
 }
@@ -88,6 +119,7 @@ export async function enrichNodesWithGeoIp<T extends { host: string; country: st
   const concurrency = 32;
   const output: T[] = [];
   for (let i = 0; i < nodes.length; i += concurrency) {
+    throwIfCancelled();
     output.push(...(await Promise.all(nodes.slice(i, i + concurrency).map(enrichOne))));
   }
   return output;
