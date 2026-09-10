@@ -122,6 +122,7 @@ export function Dashboard() {
         testUrl: current.testUrl || DEFAULT_TEST_URL,
         force: true,
         scanStrategy: current.scanStrategy,
+        mode: current.scanStrategy,
         geoip: current.geoip,
       } });
     },
@@ -132,8 +133,10 @@ export function Dashboard() {
       const next = pickActive(data, settingsRef.current.strategy, active?.id);
       setActive(next);
       const nAlive = data.nodes.filter((n) => n.alive).length;
+      const nTested = data.nodes.filter((n) => n.tested !== false).length;
+      const strategy = data.scanStrategy ?? settingsRef.current.scanStrategy;
       if (nAlive === 0) toast.error(data.probeMode === "mihomo" ? "Ни один сервер не пропустил трафик. Смените списки или URL проверки." : "Живых портов не нашлось. Смените списки или повторите.");
-      else if (data.probeMode === "mihomo") toast.success(`Настоящая проверка · ${nAlive} серверов пропустили трафик`);
+      else if (data.probeMode === "mihomo") toast.success(`${strategy} · ${nAlive} живых из ${nTested} проверенных`);
       else toast.success(`Проверка порта · ${nAlive} открытых из ${data.nodes.length}`);
       if (data.probeNote) toast.message(data.probeNote);
     },
