@@ -18,6 +18,7 @@ function node(sourceId: string, name: string, extra: Partial<ParsedNode> = {}): 
     network: "ws",
     security: "tls",
     path: "/",
+    hostHeader: "cdn.example.com",
     extra: {},
     ...extra,
   };
