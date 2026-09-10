@@ -7,11 +7,12 @@ import { DEFAULT_TEST_URL, FALLBACK_TEST_URL } from "./constants";
 import { ensureMihomoBinary, canRunMihomo } from "./mihomo-bin.server";
 import { clashProxyObject } from "./mihomo";
 import { registerMihomoChild, unregisterMihomoChild } from "./scan-control.server";
-import { endpointKey } from "./parse";
 import type { ParsedNode, ProbedNode } from "./types";
 
 const CACHE_MS = 180_000;
+const DEEP_CACHE_MS = 900_000;
 const cache = new Map<string, { at: number; latency: number | null; url: string }>();
+const deepCache = new Map<string, { at: number; ok: boolean }>();
 
 let lock: Promise<unknown> = Promise.resolve();
 
@@ -120,8 +121,18 @@ function buildProbeYaml(
     lines.push(`  - name: ${q(name)}`);
     lines.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:")));
   }
-  lines.push(``, `proxy-groups:`, `  - name: "RELAYTEST"`, `    type: url-test`, `    url: ${q(testUrl)}`,
-    `    interval: 86400`, `    lazy: false`, `    timeout: 4000`, `    expected-status: 204`, `    proxies:`);
+  lines.push(
+    ``,
+    `proxy-groups:`,
+    `  - name: "RELAYTEST"`,
+    `    type: url-test`,
+    `    url: ${q(testUrl)}`,
+    `    interval: 86400`,
+    `    lazy: false`,
+    `    timeout: 5000`,
+    `    expected-status: 204`,
+    `    proxies:`,
+  );
   for (const { name } of named) lines.push(`      - ${q(name)}`);
   lines.push(``, `rules:`, `  - MATCH,RELAYTEST`, ``);
   return lines.join("\n");
@@ -165,7 +176,7 @@ async function killChild(child: ChildProcess): Promise<void> {
 }
 
 function isAliveDelay(delay: unknown): delay is number {
-  return typeof delay === "number" && delay > 0 && delay < 65535;
+  return typeof delay === "number" && delay >= 0 && delay < 65535;
 }
 
 async function groupDelays(apiPort: number, testUrl: string, timeoutMs: number): Promise<Record<string, number>> {
@@ -198,7 +209,7 @@ async function proxyHistories(apiPort: number): Promise<Record<string, number>> 
 async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string, number | null>> {
   const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` }));
   const delays = new Map<string, number | null>();
-  for (const node of nodes) delays.set(endpointKey(node), null);
+  for (const node of nodes) delays.set(node.id, null);
   if (named.length === 0) return delays;
 
   const bin = await ensureMihomoBinary();
@@ -231,7 +242,7 @@ async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string
     const history = await proxyHistories(apiPort);
     for (const { node, name } of named) {
       const delay = measured[name] ?? history[name];
-      delays.set(endpointKey(node), isAliveDelay(delay) ? delay : null);
+      delays.set(node.id, isAliveDelay(delay) ? delay : null);
     }
     return delays;
   } finally {
@@ -251,9 +262,9 @@ export async function probeNodesMihomo(
     const fresh: ParsedNode[] = [];
     const cached = new Map<string, number | null>();
     for (const node of nodes) {
-      const key = `${testUrl}|${endpointKey(node)}`;
+      const key = `${testUrl}|${node.id}`;
       const hit = cache.get(key);
-      if (hit && now - hit.at < CACHE_MS) cached.set(endpointKey(node), hit.latency);
+      if (hit && now - hit.at < CACHE_MS) cached.set(node.id, hit.latency);
       else fresh.push(node);
     }
 
@@ -266,22 +277,61 @@ export async function probeNodesMihomo(
       const alive = [...measured.values()].filter((x) => x !== null).length;
       if (alive === 0 && urlUsed !== FALLBACK_TEST_URL) {
         urlUsed = FALLBACK_TEST_URL;
-        note = "YouTube не ответил, повтор через gstatic";
+        note = "Основной URL проверки не дал ответов, повтор через gstatic";
         measured = await runOnce(fresh, urlUsed);
       }
       const stamp = Date.now();
       for (const node of fresh) {
-        const latency = measured.get(endpointKey(node)) ?? null;
-        cache.set(`${urlUsed}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
-        cache.set(`${testUrl}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
+        const latency = measured.get(node.id) ?? null;
+        cache.set(`${urlUsed}|${node.id}`, { at: stamp, latency, url: urlUsed });
+        cache.set(`${testUrl}|${node.id}`, { at: stamp, latency, url: urlUsed });
       }
     }
 
     const probed: ProbedNode[] = nodes.map((node) => {
-      const key = endpointKey(node);
-      const latency = measured.has(key) ? (measured.get(key) ?? null) : (cached.get(key) ?? null);
+      const latency = measured.has(node.id) ? (measured.get(node.id) ?? null) : (cached.get(node.id) ?? null);
       return { ...node, latency, alive: latency !== null };
     });
     return { nodes: probed, testUrl: urlUsed, note };
+  });
+}
+
+export async function verifyNodesMihomo(
+  nodes: ParsedNode[],
+  targetUrls: string[],
+): Promise<Map<string, Record<string, boolean>>> {
+  if (!canRunMihomo() || nodes.length === 0 || targetUrls.length === 0) return new Map();
+  return withLock(async () => {
+    const output = new Map<string, Record<string, boolean>>();
+    const now = Date.now();
+    const pendingByUrl = new Map<string, ParsedNode[]>();
+
+    for (const url of targetUrls) {
+      for (const node of nodes) {
+        const hit = deepCache.get(`${url}|${node.id}`);
+        if (hit && now - hit.at < DEEP_CACHE_MS) {
+          const current = output.get(node.id) ?? {};
+          current[url] = hit.ok;
+          output.set(node.id, current);
+          continue;
+        }
+        const list = pendingByUrl.get(url) ?? [];
+        list.push(node);
+        pendingByUrl.set(url, list);
+      }
+    }
+
+    for (const [url, pending] of pendingByUrl) {
+      const measured = await runOnce(pending, url);
+      const stamp = Date.now();
+      for (const node of pending) {
+        const ok = measured.get(node.id) !== null;
+        deepCache.set(`${url}|${node.id}`, { at: stamp, ok });
+        const current = output.get(node.id) ?? {};
+        current[url] = ok;
+        output.set(node.id, current);
+      }
+    }
+    return output;
   });
 }
