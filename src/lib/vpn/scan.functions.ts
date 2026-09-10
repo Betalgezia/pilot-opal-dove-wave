@@ -7,6 +7,7 @@ const sourceSchema = z.object({
   url: z.string().min(8).max(500),
   enabled: z.boolean(),
 });
+const emptyInput = z.object({});
 
 export const scanSources = createServerFn({ method: "POST" })
   .validator(
@@ -32,7 +33,9 @@ export const scanSources = createServerFn({ method: "POST" })
     });
   });
 
-export const getProbeCaps = createServerFn({ method: "GET" }).handler(async () => {
-  const { canRunMihomo } = await import("./mihomo-bin.server");
-  return { mihomo: canRunMihomo() };
-});
+export const getProbeCaps = createServerFn({ method: "GET" })
+  .validator(emptyInput)
+  .handler(async () => {
+    const { canRunMihomo } = await import("./mihomo-bin.server");
+    return { mihomo: Boolean(canRunMihomo()) };
+  });
