@@ -26,6 +26,8 @@ export interface ParsedNode {
   serverIp?: string;
   sourceId: string;
   sourceName: string;
+  sourceIds?: string[];
+  sourceNames?: string[];
   uuid?: string;
   password?: string;
   method?: string;
@@ -85,6 +87,8 @@ export interface ScanMetrics {
   mihomoLoaded: number;
   mihomoDelayReceived: number;
   unknown: number;
+  deduplicated: number;
+  mihomoRounds: number;
 }
 
 export interface ScanResult {
