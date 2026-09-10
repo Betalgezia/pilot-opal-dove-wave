@@ -12,11 +12,14 @@ const filtersSchema = z.object({
   blacklistEntries: z.array(z.string().max(253)).max(512),
   testUrl: z.string().url().max(300),
 });
+const emptyInput = z.object({});
 
-export const getPanelFilters = createServerFn({ method: "GET" }).handler(async () => {
-  const { getPanelFilters: read } = await import("./panel-filters.server");
-  return read();
-});
+export const getPanelFilters = createServerFn({ method: "GET" })
+  .validator(emptyInput)
+  .handler(async () => {
+    const { getPanelFilters: read } = await import("./panel-filters.server");
+    return read();
+  });
 
 export const savePanelFilters = createServerFn({ method: "POST" })
   .validator(filtersSchema)
