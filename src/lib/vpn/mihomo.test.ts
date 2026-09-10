@@ -8,22 +8,25 @@ import { buildMihomoYaml } from "./mihomo.ts";
 import { canRunMihomo, ensureMihomoBinary } from "./mihomo-bin.server.ts";
 import type { ParsedNode, SourceScan } from "./types.ts";
 
-const sources: SourceScan[] = [{ id: "src", name: "source", url: "https://example.invalid/list", ok: true, error: null, parsed: 1, unique: 1, probed: 1, alive: 1, bestLatency: 100 }];
-const node: ParsedNode = {
-  id: "test-node",
-  uri: "vless://11111111-1111-1111-1111-111111111111@example.com:443?type=tcp&security=tls&sni=example.com",
-  protocol: "vless",
-  name: "DE test",
-  host: "example.com",
-  port: 443,
-  country: "DE",
-  sourceId: "src",
-  sourceName: "source",
-  uuid: "11111111-1111-1111-1111-111111111111",
-  security: "tls",
-  network: "tcp",
-  extra: {},
-};
+const sources: SourceScan[] = [{ id: "src", name: "source", url: "https://example.invalid/list", ok: true, error: null, parsed: 2, unique: 2, probed: 2, alive: 2, bestLatency: 100 }];
+function makeNode(id: string): ParsedNode {
+  return {
+    id,
+    uri: `vless://${id}@example.com:443?type=tcp&security=tls&sni=example.com`,
+    protocol: "vless",
+    name: "DE test",
+    host: "example.com",
+    port: 443,
+    country: "DE",
+    sourceId: "src",
+    sourceName: "source",
+    uuid: "11111111-1111-1111-1111-111111111111",
+    security: "tls",
+    network: "tcp",
+    extra: {},
+  };
+}
+const node = makeNode("test-node");
 
 test("buildMihomoYaml keeps proxy list and groups structurally valid", () => {
   const yaml = buildMihomoYaml([node], sources);
@@ -33,6 +36,13 @@ test("buildMihomoYaml keeps proxy list and groups structurally valid", () => {
   assert.match(yaml, /\nrules:\n  - MATCH,RELAY\n$/);
   assert.doesNotMatch(yaml, /client-fingerprint: .* +"/);
   assert.doesNotMatch(yaml, /network: "[^\"]+ +"/);
+});
+
+test("generated YAML uses unique proxy names on collisions", () => {
+  const yaml = buildMihomoYaml([makeNode("a"), makeNode("b")], sources);
+  const names = [...yaml.matchAll(/^  - name: "([^"]+)"$/gm)].map((m) => m[1]);
+  assert.equal(new Set(names).size, names.length);
+  assert.ok(names.some((name) => name.endsWith("-2")));
 });
 
 test("generated YAML is accepted by mihomo when the local binary is available", async (t) => {
