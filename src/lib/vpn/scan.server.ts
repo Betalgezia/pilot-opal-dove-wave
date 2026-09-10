@@ -3,6 +3,7 @@ import { fetchSourceText } from "./fetch-source.server";
 import { canRunMihomo } from "./mihomo-bin.server";
 import { enrichNodesWithGeoIp } from "./geoip.server";
 import { endpointKey, parseSubscription } from "./parse";
+import { mergeNodesByIdentity } from "./node-identity";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
 import { getQualityHistory, qualityHistoryKey, recordQualityResults } from "./quality-history.server";
@@ -34,15 +35,19 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
   const perSource = opts?.perSource ?? 16; const globalCap = opts?.globalCap ?? 64; const timeoutMs = opts?.timeoutMs ?? 2200; const wantReal = opts?.real !== false; const started = Date.now(); throwIfCancelled();
   const history = await getQualityHistory(); const enabled = sources.filter((s) => s.enabled); const fetchedStart = Date.now();
   const fetched = await Promise.all(enabled.map(async (source) => { const fetchStart = Date.now(); try { const text = await fetchSourceText(source.url); const fetchMs = Date.now() - fetchStart; throwIfCancelled(); const parseStart = Date.now(); const nodes = parseSubscription(text, source.id, source.name); return { source, nodes, error: null as string | null, fetchMs, parseMs: Date.now() - parseStart }; } catch (err) { if (err instanceof DOMException && err.name === "AbortError") throw err; return { source, nodes: [] as ParsedNode[], error: err instanceof Error ? err.message : "fetch failed", fetchMs: Date.now() - fetchStart, parseMs: 0 }; } }));
-  const fetchWallMs = Date.now() - fetchedStart; throwIfCancelled(); const allNodes = fetched.flatMap((f) => f.nodes); const uniqueTotal = new Set(allNodes.map((n) => n.id)).size;
+  const fetchWallMs = Date.now() - fetchedStart; throwIfCancelled();
+  const parsedNodes = fetched.flatMap((f) => f.nodes);
+  const allNodes = mergeNodesByIdentity(parsedNodes);
+  const uniqueTotal = allNodes.length;
+  const deduplicated = Math.max(0, parsedNodes.length - allNodes.length);
   const sampleStart = Date.now(); const sampled = sampleForProbe(allNodes, perSource, globalCap, history, started); const sampleMs = Date.now() - sampleStart;
 
-  let probeMode: ProbeMode = wantReal ? "mihomo" : "tcp"; let testUrl: string | null = wantReal ? (opts?.testUrl || DEFAULT_TEST_URL) : null; let probeNote: string | null = null; let probed: ProbedNode[]; let mihomoLoaded = 0; let mihomoDelayReceived = 0; let unknown = 0;
+  let probeMode: ProbeMode = wantReal ? "mihomo" : "tcp"; let testUrl: string | null = wantReal ? (opts?.testUrl || DEFAULT_TEST_URL) : null; let probeNote: string | null = null; let probed: ProbedNode[]; let mihomoLoaded = 0; let mihomoDelayReceived = 0; let unknown = 0; let mihomoRounds = 0;
   const probeStart = Date.now();
   if (wantReal) {
     if (!canRunMihomo()) { probed = unknownNodes(sampled); unknown = probed.length; probeNote = "Ядро mihomo недоступно: результаты проверки неизвестны; TCP не используется как замена."; }
     else {
-      try { const { probeNodesMihomo } = await import("./mihomo-probe.server"); const real = await probeNodesMihomo(sampled, opts?.testUrl || DEFAULT_TEST_URL); probed = real.nodes; testUrl = real.testUrl; probeNote = real.note; mihomoLoaded = real.metrics.mihomoLoaded; mihomoDelayReceived = real.metrics.mihomoDelayReceived; unknown = real.metrics.unknown; }
+      try { const { probeNodesMihomo } = await import("./mihomo-probe.server"); const real = await probeNodesMihomo(sampled, opts?.testUrl || DEFAULT_TEST_URL); probed = real.nodes; testUrl = real.testUrl; probeNote = real.note; mihomoLoaded = real.metrics.mihomoLoaded; mihomoDelayReceived = real.metrics.mihomoDelayReceived; unknown = real.metrics.unknown; mihomoRounds = real.metrics.rounds; }
       catch (err) { probed = unknownNodes(sampled); unknown = probed.length; probeNote = `Проверка mihomo не завершилась: ${err instanceof Error ? err.message : "неизвестная ошибка"}. Узлы отмечены как неизвестные; TCP не используется как замена.`; }
     }
   } else { probed = await probeNodes(sampled, timeoutMs); unknown = probed.filter((n) => n.probeState === "unknown").length; probeNote = "Режим без mihomo: проверяется только TCP-порт, это не подтверждение работоспособности VPN."; }
@@ -57,7 +62,7 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
   const deepVerifyMs = Date.now() - deepStart; throwIfCancelled();
   const qualityStart = Date.now(); const now = Date.now(); probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(qualityHistoryKey(node)), now) })); const qualityMs = Date.now() - qualityStart; await recordQualityResults(probed.filter((n) => n.probeState === "checked"));
 
-  const sourcesOut: SourceScan[] = fetched.map((f) => { const mine = probed.filter((n) => n.sourceId === f.source.id); const alive = mine.filter((n) => n.alive); const latencies = alive.map((n) => n.latency).filter((x): x is number => x !== null); return { id: f.source.id, name: f.source.name, url: f.source.url, ok: f.error === null, error: f.error, parsed: f.nodes.length, unique: new Set(f.nodes.map((n) => n.id)).size, probed: mine.length, alive: alive.length, bestLatency: latencies.length ? Math.min(...latencies) : null }; });
-  const ranked = rankNodes(probed); const totalMs = Date.now() - started; const metrics: ScanMetrics = { fetchMs: Math.max(fetchWallMs, fetched.reduce((sum, item) => sum + item.fetchMs, 0)), parseMs: fetched.reduce((sum, item) => sum + item.parseMs, 0), sampleMs, probeMs, geoIpMs, deepVerifyMs, qualityMs, totalMs, sampled: sampled.length, deepVerified: ranked.filter((node) => Object.keys(node.targetResults ?? {}).length > 0).length, targetChecks: countTargetChecks(ranked), mihomoLoaded, mihomoDelayReceived, unknown };
-  return { scannedAt: Date.now(), durationMs: totalMs, sources: sourcesOut, nodes: ranked, parsedTotal: allNodes.length, uniqueTotal, probeMode, testUrl, probeNote, metrics };
+  const sourcesOut: SourceScan[] = fetched.map((f) => { const mine = probed.filter((n) => (n.sourceIds ?? [n.sourceId]).includes(f.source.id)); const alive = mine.filter((n) => n.alive); const latencies = alive.map((n) => n.latency).filter((x): x is number => x !== null); return { id: f.source.id, name: f.source.name, url: f.source.url, ok: f.error === null, error: f.error, parsed: f.nodes.length, unique: new Set(f.nodes.map((n) => n.id)).size, probed: mine.length, alive: alive.length, bestLatency: latencies.length ? Math.min(...latencies) : null }; });
+  const ranked = rankNodes(probed); const totalMs = Date.now() - started; const metrics: ScanMetrics = { fetchMs: Math.max(fetchWallMs, fetched.reduce((sum, item) => sum + item.fetchMs, 0)), parseMs: fetched.reduce((sum, item) => sum + item.parseMs, 0), sampleMs, probeMs, geoIpMs, deepVerifyMs, qualityMs, totalMs, sampled: sampled.length, deepVerified: ranked.filter((node) => Object.keys(node.targetResults ?? {}).length > 0).length, targetChecks: countTargetChecks(ranked), mihomoLoaded, mihomoDelayReceived, unknown, deduplicated, mihomoRounds };
+  return { scannedAt: Date.now(), durationMs: totalMs, sources: sourcesOut, nodes: ranked, parsedTotal: parsedNodes.length, uniqueTotal, probeMode, testUrl, probeNote, metrics };
 }
