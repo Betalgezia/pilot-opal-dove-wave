@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rankNodes, scoreNode } from "./quality";
-import type { ProbedNode } from "./types";
+import { rankNodes, scoreNode } from "./quality.ts";
+import type { ProbedNode } from "./types.ts";
 
 function node(id: string, latency: number, extra: Partial<ProbedNode> = {}): ProbedNode {
   return {
@@ -43,7 +43,7 @@ test("deep target success improves quality without changing alive verdict", () =
   assert.equal(verified.alive, true);
 });
 
-test("ranking prefers healthy quality evidence before raw latency tie-break", () => {
+test("ranking prefers verified quality evidence before raw latency tie-break", () => {
   const fastButUnverified = node("fast", 80);
   const verified = node("verified", 150, {
     targetResults: {
