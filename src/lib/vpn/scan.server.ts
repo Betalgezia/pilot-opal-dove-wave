@@ -3,6 +3,7 @@ import { DEFAULT_SCAN_STRATEGY, DEFAULT_TEST_URL } from "./constants";
 import { fetchSourceText } from "./fetch-source.server";
 import { canRunMihomo } from "./mihomo-bin.server";
 import { enrichNodesWithGeoIp } from "./geoip.server";
+import { relayLog } from "./log";
 import { parseSubscription, endpointKey } from "./parse";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
@@ -90,10 +91,18 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
   const wantReal = opts?.real !== false;
   const scanStrategy: ScanStrategy = opts?.scanStrategy ?? DEFAULT_SCAN_STRATEGY;
   const wantGeo = opts?.geoip !== false;
+  const enabled = sources.filter((s) => s.enabled);
   const started = Date.now();
   throwIfCancelled();
-
-  const enabled = sources.filter((s) => s.enabled);
+  relayLog("runScan", {
+    strategy: scanStrategy,
+    real: wantReal,
+    geoip: wantGeo,
+    force: opts?.force === true,
+    sources: enabled.length,
+    perSource,
+    globalCap,
+  });
   const fetched = await Promise.all(
     enabled.map(async (source) => {
       try {
@@ -113,6 +122,7 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
   const allNodes = fetched.flatMap((f) => f.nodes);
   const uniqueTotal = new Set(allNodes.map(endpointKey)).size;
   const sampled = sampleForProbe(allNodes, perSource, globalCap);
+  relayLog("parsed", { total: allNodes.length, unique: uniqueTotal, sampled: sampled.length });
 
   let probeMode: ProbeMode = "tcp";
   let testUrl: string | null = null;
@@ -124,6 +134,7 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
       const { probeNodesMihomo } = await import("./mihomo-probe.server");
       const real = await probeNodesMihomo(sampled, opts?.testUrl || DEFAULT_TEST_URL, {
         strategy: scanStrategy,
+        force: opts?.force === true,
       });
       probed = real.nodes;
       probeMode = "mihomo";
@@ -149,7 +160,8 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
 
   const sourcesOut: SourceScan[] = fetched.map((f) => {
     const mine = probed.filter((n) => n.sourceId === f.source.id);
-    const alive = mine.filter((n) => n.alive);
+    const tested = mine.filter((n) => n.tested !== false);
+    const alive = tested.filter((n) => n.alive);
     const latencies = alive.map((n) => n.latency).filter((x): x is number => x !== null);
     return {
       id: f.source.id,
@@ -159,7 +171,7 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
       error: f.error,
       parsed: f.nodes.length,
       unique: new Set(f.nodes.map(endpointKey)).size,
-      probed: mine.length,
+      probed: tested.length,
       alive: alive.length,
       bestLatency: latencies.length ? Math.min(...latencies) : null,
     };
@@ -167,7 +179,19 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
 
   probed.sort((a, b) => {
     if (a.alive !== b.alive) return a.alive ? -1 : 1;
+    if ((a.tested !== false) !== (b.tested !== false)) return a.tested === false ? 1 : -1;
     return (a.latency ?? 99999) - (b.latency ?? 99999);
+  });
+
+  const testedTotal = probed.filter((n) => n.tested !== false).length;
+  const aliveTotal = probed.filter((n) => n.alive).length;
+  relayLog("runScan done", {
+    strategy: scanStrategy,
+    probeMode,
+    ms: Date.now() - started,
+    tested: testedTotal,
+    alive: aliveTotal,
+    skipped: probed.length - testedTotal,
   });
 
   return {
