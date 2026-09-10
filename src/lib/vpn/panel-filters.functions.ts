@@ -12,7 +12,7 @@ const filtersSchema = z.object({
   blacklistEntries: z.array(z.string().max(253)).max(512),
   testUrl: z.string().url().max(300),
 });
-const emptyInput = z.object({});
+const emptyInput = z.object({}).optional();
 
 export const getPanelFilters = createServerFn({ method: "GET" })
   .validator(emptyInput)
