@@ -1,5 +1,5 @@
 import { endpointKey, protocolRank } from "./parse";
-import type { NodeQualityHistory } from "./quality-history.server";
+import { qualityHistoryKey, type NodeQualityHistory } from "./quality-history.server";
 import type { ParsedNode } from "./types";
 
 export function sampleForProbe(
@@ -22,10 +22,7 @@ export function sampleForProbe(
   for (const list of bySource.values()) {
     const unique = uniqueNodes(list);
     const sourceFactor = sourceSamplingFactor(unique, history);
-    const targetCount = Math.min(
-      unique.length,
-      Math.max(4, Math.round(perSource * sourceFactor)),
-    );
+    const targetCount = Math.min(unique.length, Math.max(4, Math.round(perSource * sourceFactor)));
     picked.push(...smartSample(unique, targetCount, history, seed));
   }
 
@@ -45,8 +42,12 @@ function uniqueNodes(list: ParsedNode[]): ParsedNode[] {
   return out;
 }
 
+function historyOf(node: ParsedNode, history: Map<string, NodeQualityHistory>): NodeQualityHistory | undefined {
+  return history.get(qualityHistoryKey(node));
+}
+
 function sourceSamplingFactor(nodes: ParsedNode[], history: Map<string, NodeQualityHistory>): number {
-  const known = nodes.map((n) => history.get(n.id)).filter((x): x is NodeQualityHistory => Boolean(x && x.samples > 0));
+  const known = nodes.map((n) => historyOf(n, history)).filter((x): x is NodeQualityHistory => Boolean(x && x.samples > 0));
   if (known.length < 8) return 1;
   const reliability = known.reduce((sum, h) => sum + h.successes / h.samples, 0) / known.length;
   return Math.max(0.75, Math.min(1.5, 1.5 - reliability * 0.75));
@@ -61,7 +62,7 @@ function recencyWeight(history: NodeQualityHistory | undefined, seed: number): n
 }
 
 function priority(node: ParsedNode, history: Map<string, NodeQualityHistory>, seed: number): number {
-  const h = history.get(node.id);
+  const h = historyOf(node, history);
   if (!h || h.samples === 0) return 0.45 + (hash(`${node.id}|${Math.floor(seed / 600_000)}`) / 0xffffffff) * 0.1;
   const reliability = h.successes / Math.max(1, h.samples);
   const latency = h.latencyEwma === null ? 0.4 : 1 - Math.min(1, h.latencyEwma / 1200);
@@ -70,7 +71,7 @@ function priority(node: ParsedNode, history: Map<string, NodeQualityHistory>, se
 }
 
 function diversityKey(node: ParsedNode, history: Map<string, NodeQualityHistory>): string {
-  const country = (node.country ?? history.get(node.id)?.country ?? "XX").toUpperCase();
+  const country = (node.country ?? historyOf(node, history)?.country ?? "XX").toUpperCase();
   const raw = node.serverIp || node.host;
   const ip = raw.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (ip) return `${country}|${ip[1]}.${ip[2]}.${ip[3]}`;
@@ -89,7 +90,6 @@ function smartSample(
   const ranked = [...list].sort((a, b) => priority(b, history, seed) - priority(a, history, seed));
   const out: ParsedNode[] = [];
   const seen = new Set<string>();
-
   const take = (node: ParsedNode) => {
     if (out.length >= count || seen.has(node.id)) return;
     seen.add(node.id);
@@ -106,22 +106,19 @@ function smartSample(
     bucket.push(node);
     buckets.set(key, bucket);
   }
-  const bucketQueue = [...buckets.values()].sort((a, b) => {
-    const pa = Math.max(...a.map((node) => priority(node, history, seed)));
-    const pb = Math.max(...b.map((node) => priority(node, history, seed)));
-    return pb - pa;
-  });
-  const sortedBuckets = bucketQueue.map((bucket) => [...bucket].sort((a, b) => priority(b, history, seed) - priority(a, history, seed)));
+  const sortedBuckets = [...buckets.values()]
+    .map((bucket) => [...bucket].sort((a, b) => priority(b, history, seed) - priority(a, history, seed)))
+    .sort((a, b) => priority(b[0], history, seed) - priority(a[0], history, seed));
+
   let round = 0;
   while (out.length < count && sortedBuckets.length) {
     let added = false;
     for (const bucket of sortedBuckets) {
       const candidate = bucket[round];
-      if (candidate) {
-        take(candidate);
-        added = true;
-        if (out.length >= count) break;
-      }
+      if (!candidate) continue;
+      take(candidate);
+      added = true;
+      if (out.length >= count) break;
     }
     if (!added) break;
     round += 1;
