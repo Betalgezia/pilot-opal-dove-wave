@@ -54,12 +54,10 @@ export function scoreNode(
   now = Date.now(),
 ): { qualityScore: number; confidence: number; stability: number } {
   const stable = stabilityScore(history, now);
-  const confidenceBase = historyReliability(history, now);
-  const confidence = Math.round(clamp(
-    (node.alive ? 0.65 : 0.1) + confidenceBase * 0.35,
-    0,
-    1,
-  ) * 100);
+  const reliability = historyReliability(history, now);
+  const confidence = history && history.samples > 0
+    ? Math.round(clamp((node.alive ? 0.65 : 0.1) + reliability * 0.35, 0, 1) * 100)
+    : node.alive ? 70 : 5;
   const score = node.alive
     ? Math.round(clamp(
         latencyScore(node.latency) + stable + targetScore(node.targetResults) + confidence * 0.15,
