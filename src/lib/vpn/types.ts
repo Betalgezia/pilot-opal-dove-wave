@@ -48,6 +48,10 @@ export interface ParsedNode {
 export interface ProbedNode extends ParsedNode {
   latency: number | null;
   alive: boolean;
+  qualityScore?: number;
+  confidence?: number;
+  stability?: number;
+  targetResults?: Record<string, boolean>;
 }
 
 export interface SourceScan {
@@ -63,6 +67,20 @@ export interface SourceScan {
   bestLatency: number | null;
 }
 
+export interface ScanMetrics {
+  fetchMs: number;
+  parseMs: number;
+  sampleMs: number;
+  probeMs: number;
+  geoIpMs: number;
+  deepVerifyMs: number;
+  qualityMs: number;
+  totalMs: number;
+  sampled: number;
+  deepVerified: number;
+  targetChecks: number;
+}
+
 export interface ScanResult {
   scannedAt: number;
   durationMs: number;
@@ -73,6 +91,7 @@ export interface ScanResult {
   probeMode: ProbeMode;
   testUrl: string | null;
   probeNote: string | null;
+  metrics?: ScanMetrics;
 }
 
 export type ExportFormat = "clash" | "uri" | "b64";
