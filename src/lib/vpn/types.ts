@@ -45,9 +45,12 @@ export interface ParsedNode {
   extra: Record<string, string>;
 }
 
+export type ProbeState = "checked" | "unknown";
+
 export interface ProbedNode extends ParsedNode {
   latency: number | null;
   alive: boolean;
+  probeState: ProbeState;
   qualityScore?: number;
   confidence?: number;
   stability?: number;
@@ -79,6 +82,9 @@ export interface ScanMetrics {
   sampled: number;
   deepVerified: number;
   targetChecks: number;
+  mihomoLoaded: number;
+  mihomoDelayReceived: number;
+  unknown: number;
 }
 
 export interface ScanResult {
