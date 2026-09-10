@@ -18,17 +18,8 @@ export function nodeIdentityKey(node: ParsedNode): string {
 }
 
 function completeness(node: ParsedNode): number {
-  return [
-    node.uuid,
-    node.password,
-    node.method,
-    node.sni,
-    node.path,
-    node.serviceName,
-    node.pbk,
-    node.sid,
-    node.alpn,
-  ].filter((value) => typeof value === "string" && value.trim()).length;
+  return [node.uuid, node.password, node.method, node.sni, node.path, node.serviceName, node.pbk, node.sid, node.alpn]
+    .filter((value) => typeof value === "string" && value.trim()).length;
 }
 
 export function mergeNodesByIdentity(nodes: ParsedNode[]): ParsedNode[] {
@@ -40,11 +31,7 @@ export function mergeNodesByIdentity(nodes: ParsedNode[]): ParsedNode[] {
     const key = nodeIdentityKey(node);
     const current = merged.get(key);
     if (!current || completeness(node) > completeness(current)) {
-      merged.set(key, current ? {
-        ...node,
-        sourceId: current.sourceId,
-        sourceName: current.sourceName,
-      } : node);
+      merged.set(key, current ? { ...node, sourceId: current.sourceId, sourceName: current.sourceName } : node);
     }
     const ids = sourceIds.get(key) ?? new Set<string>();
     ids.add(node.sourceId);
