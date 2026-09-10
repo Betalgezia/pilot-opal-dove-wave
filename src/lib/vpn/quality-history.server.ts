@@ -31,6 +31,15 @@ const memory = new Map<string, NodeQualityHistory>();
 let loaded = false;
 let persistTimer: NodeJS.Timeout | null = null;
 
+export function qualityHistoryKey(node: Pick<ProbedNode, "id">): string {
+  let hash = 2166136261;
+  for (let i = 0; i < node.id.length; i += 1) {
+    hash ^= node.id.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function normalizeTargetHistory(value: unknown): Record<string, TargetHistory> {
   if (!value || typeof value !== "object") return {};
   const out: Record<string, TargetHistory> = {};
@@ -111,10 +120,11 @@ export async function recordQualityResults(nodes: ProbedNode[]): Promise<void> {
   await load();
   const now = Date.now();
   for (const node of nodes) {
-    const previous = memory.get(node.id);
+    const key = qualityHistoryKey(node);
+    const previous = memory.get(key);
     const targetResults = node.targetResults ?? {};
     const entry: NodeQualityHistory = previous ?? {
-      nodeId: node.id,
+      nodeId: key,
       samples: 0,
       successes: 0,
       failures: 0,
@@ -158,7 +168,7 @@ export async function recordQualityResults(nodes: ProbedNode[]): Promise<void> {
       target.lastAt = now;
       entry.targets[url] = target;
     }
-    memory.set(node.id, entry);
+    memory.set(key, entry);
   }
 
   if (memory.size > MAX_ENTRIES) {
