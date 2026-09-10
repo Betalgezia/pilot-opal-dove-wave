@@ -1,5 +1,6 @@
 import type { ProbedNode, ScanResult, SelectStrategy } from "./types";
 import { EMPTY_FILTERS, filterSubscriptionNodes, type SubscriptionFilters } from "./subscription-filter";
+import { rankNodes } from "./quality";
 
 export function pickActive(
   result: ScanResult,
@@ -18,14 +19,15 @@ export function pickActive(
   if (strategy === "fallback") {
     for (const source of result.sources) {
       if (!source.ok || source.alive === 0) continue;
-      const hit = alive.find((n) => n.sourceId === source.id);
+      const hit = rankNodes(alive.filter((n) => n.sourceId === source.id))[0];
       if (hit) return hit;
     }
-    return alive[0];
+    return rankNodes(alive)[0];
   }
 
-  const idx = previousId ? alive.findIndex((n) => n.id === previousId) : -1;
-  return alive[(idx + 1) % alive.length];
+  const ordered = rankNodes(alive);
+  const idx = previousId ? ordered.findIndex((n) => n.id === previousId) : -1;
+  return ordered[(idx + 1) % ordered.length];
 }
 
 export function pickExportNodes(
@@ -35,12 +37,7 @@ export function pickExportNodes(
 ): ProbedNode[] {
   if (limit <= 0) return [];
 
-  return [...filterSubscriptionNodes(result.nodes, filters)]
-    .sort((a, b) => {
-      const latency = (a.latency ?? 99999) - (b.latency ?? 99999);
-      if (latency !== 0) return latency;
-      return a.id.localeCompare(b.id);
-    })
+  return rankNodes(filterSubscriptionNodes(result.nodes, filters))
     .slice(0, limit);
 }
 
