@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 const activeControllers = new Set<AbortController>();
 const activeChildren = new Set<ChildProcess>();
@@ -26,6 +26,21 @@ export function unregisterMihomoChild(child: ChildProcess): void {
   activeChildren.delete(child);
 }
 
+function forceKill(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function cancelActiveScan(): Promise<boolean> {
   if (activeControllers.size === 0 && activeChildren.size === 0) return false;
 
@@ -47,11 +62,7 @@ export async function cancelActiveScan(): Promise<boolean> {
     const timer = setTimeout(() => {
       for (const child of children) {
         if (child.exitCode !== null) continue;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* ignore */
-        }
+        forceKill(child);
       }
       resolve();
     }, 2000);

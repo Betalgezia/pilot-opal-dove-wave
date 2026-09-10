@@ -18,10 +18,10 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DEFAULT_SOURCES, SETTINGS_KEY, STORAGE_KEY } from "@/lib/vpn/defaults";
-import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N, DEFAULT_TEST_URL } from "@/lib/vpn/constants";
+import { DEFAULT_EXPORT_FMT, DEFAULT_EXPORT_N, DEFAULT_SCAN_STRATEGY, DEFAULT_TEST_URL } from "@/lib/vpn/constants";
 import { getProbeCaps, scanSources } from "@/lib/vpn/scan.functions";
 import { formatMs, pickActive } from "@/lib/vpn/select";
-import type { ExportFormat, ProbedNode, ScanResult, SelectStrategy, SourceDef } from "@/lib/vpn/types";
+import type { ExportFormat, ProbedNode, ScanResult, ScanStrategy, SelectStrategy, SourceDef } from "@/lib/vpn/types";
 
 interface Settings {
   autoRefresh: boolean;
@@ -30,6 +30,9 @@ interface Settings {
   testUrl: string;
   exportFmt: ExportFormat;
   exportN: number;
+  scanStrategy: ScanStrategy;
+  geoip: boolean;
+  subIdle: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -39,7 +42,16 @@ const DEFAULT_SETTINGS: Settings = {
   testUrl: DEFAULT_TEST_URL,
   exportFmt: DEFAULT_EXPORT_FMT,
   exportN: DEFAULT_EXPORT_N,
+  scanStrategy: DEFAULT_SCAN_STRATEGY,
+  geoip: true,
+  subIdle: false,
 };
+
+const SCAN_MODE_OPTIONS: Array<{ id: ScanStrategy; label: string; hint: string }> = [
+  { id: "full", label: "Полный", hint: "один mihomo, весь пул сразу — как раньше" },
+  { id: "batches", label: "Пакеты", hint: "пачки по 64, процесс перезапускается, стоп около 80 живых" },
+  { id: "groups", label: "Группы", hint: "один mihomo, группы по 64, без перезапуска процесса" },
+];
 
 function loadSources(): SourceDef[] {
   try {
@@ -55,7 +67,9 @@ function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Settings) };
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    const scanStrategy = parsed.scanStrategy === "batches" || parsed.scanStrategy === "groups" ? parsed.scanStrategy : DEFAULT_SCAN_STRATEGY;
+    return { ...DEFAULT_SETTINGS, ...parsed, scanStrategy };
   } catch { return DEFAULT_SETTINGS; }
 }
 
@@ -66,16 +80,22 @@ export function Dashboard() {
   const [active, setActive] = useState<ProbedNode | null>(null);
   const [persist, setPersist] = useState(false);
   const [mihomoOk, setMihomoOk] = useState(true);
+  const [installDir, setInstallDir] = useState<string>("");
   const [scanStopped, setScanStopped] = useState(false);
   const cancelRequestedRef = useRef(false);
   const sourcesRef = useRef(sources);
+  const settingsRef = useRef(settings);
   sourcesRef.current = sources;
+  settingsRef.current = settings;
 
   useEffect(() => {
     setSources(loadSources());
     setSettings(loadSettings());
     setPersist(true);
-    getProbeCaps().then((caps) => setMihomoOk(Boolean(caps.mihomo))).catch(() => setMihomoOk(false));
+    getProbeCaps().then((caps) => {
+      setMihomoOk(Boolean(caps.mihomo));
+      if (typeof caps.installDir === "string") setInstallDir(caps.installDir);
+    }).catch(() => setMihomoOk(false));
   }, []);
 
   useEffect(() => {
@@ -92,25 +112,31 @@ export function Dashboard() {
     mutationFn: async () => {
       const enabled = sourcesRef.current.filter((s) => s.enabled);
       if (enabled.length === 0) throw new Error("Включите хотя бы один источник");
+      const current = settingsRef.current;
       return scanSources({ data: {
         sources: enabled,
         perSource: 3000,
         globalCap: 20000,
-        timeoutMs: settings.realProbe ? 6000 : 2200,
-        real: settings.realProbe,
-        testUrl: settings.testUrl || DEFAULT_TEST_URL,
+        timeoutMs: current.realProbe ? 6000 : 2200,
+        real: current.realProbe,
+        testUrl: current.testUrl || DEFAULT_TEST_URL,
         force: true,
+        scanStrategy: current.scanStrategy,
+        mode: current.scanStrategy,
+        geoip: current.geoip,
       } });
     },
     onSuccess: (data) => {
       cancelRequestedRef.current = false;
       setScanStopped(false);
       setResult(data);
-      const next = pickActive(data, settings.strategy, active?.id);
+      const next = pickActive(data, settingsRef.current.strategy, active?.id);
       setActive(next);
       const nAlive = data.nodes.filter((n) => n.alive).length;
+      const nTested = data.nodes.filter((n) => n.tested !== false).length;
+      const strategy = data.scanStrategy ?? settingsRef.current.scanStrategy;
       if (nAlive === 0) toast.error(data.probeMode === "mihomo" ? "Ни один сервер не пропустил трафик. Смените списки или URL проверки." : "Живых портов не нашлось. Смените списки или повторите.");
-      else if (data.probeMode === "mihomo") toast.success(`Настоящая проверка · ${nAlive} серверов пропустили трафик`);
+      else if (data.probeMode === "mihomo") toast.success(`${strategy} · ${nAlive} живых из ${nTested} проверенных`);
       else toast.success(`Проверка порта · ${nAlive} открытых из ${data.nodes.length}`);
       if (data.probeNote) toast.message(data.probeNote);
     },
@@ -183,14 +209,22 @@ export function Dashboard() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Как пользоваться</DialogTitle>
-              <DialogDescription>Relay не скачивается как VPN и не включает туннель в браузере. Это пульт: он проверяет списки и собирает конфиг. Подключение делает программа на компьютере.</DialogDescription>
+              <DialogDescription>Relay не включает VPN сам. Пока это окно и сервер запущены — живая подписка в Hiddify работает. Если закрыть Relay, ссылка перестанет обновляться.</DialogDescription>
             </DialogHeader>
             <ol className="space-y-3 text-sm text-fg-muted">
               <li><span className="font-medium text-fg">1.</span> Поставьте на ПК Hiddify или Clash Verge Rev.</li>
-              <li><span className="font-medium text-fg">2.</span> Здесь нажмите «Обновить пул».</li>
-              <li><span className="font-medium text-fg">3.</span> Вкладка «Экспорт» → скачайте relay.yaml.</li>
-              <li><span className="font-medium text-fg">4.</span> В клиенте импортируйте файл, выберите RELAY или AUTO, подключитесь.</li>
+              <li><span className="font-medium text-fg">2.</span> Здесь нажмите «Сканировать».</li>
+              <li><span className="font-medium text-fg">3.</span> Вкладка «Экспорт»: с ПК берите localhost, с телефона — LAN IP той же Wi‑Fi сети.</li>
+              <li><span className="font-medium text-fg">4.</span> В клиенте: New Profile → вставить URL. Пока Relay запущен, подписка живая.</li>
             </ol>
+            {installDir ? (
+              <p className="mt-3 text-xs leading-relaxed text-fg-subtle">
+                Ядро mihomo лежит в <span className="font-mono text-fg-muted">{installDir}</span>. Если Windows Defender ругается, добавьте эту папку в исключения.
+              </p>
+            ) : null}
+            <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
+              Страна узла определяется офлайн-базой GeoLite2 (MaxMind). Это можно выключить тумблером «GeoIP».
+            </p>
           </DialogContent>
         </Dialog>
       </header>
@@ -213,6 +247,26 @@ export function Dashboard() {
           <div className="w-full min-w-0 space-y-3 rounded-xl bg-surface p-4 shadow-border">
             <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">Автообновление</p><p className="text-xs text-fg-muted">каждые 3 минуты</p></div><Switch checked={settings.autoRefresh} onCheckedChange={(autoRefresh) => setSettings((s) => ({ ...s, autoRefresh }))} /></div>
             <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">Настоящая проверка</p><p className="text-xs text-fg-muted">{mihomoOk ? "трафик через ядро mihomo" : "ядро недоступно на этом хосте"}</p></div><Switch checked={settings.realProbe && mihomoOk} disabled={!mihomoOk} onCheckedChange={(realProbe) => setSettings((s) => ({ ...s, realProbe }))} /></div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Режим скана</p>
+              <div className="flex flex-wrap gap-1.5">
+                {SCAN_MODE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setSettings((s) => ({ ...s, scanStrategy: opt.id }))}
+                    className={`h-8 rounded-md px-2.5 text-xs ${settings.scanStrategy === opt.id ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs leading-relaxed text-fg-subtle">
+                {SCAN_MODE_OPTIONS.find((opt) => opt.id === settings.scanStrategy)?.hint}
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">GeoIP</p><p className="text-xs text-fg-muted">страна по IP, база MaxMind GeoLite2</p></div><Switch checked={settings.geoip} onCheckedChange={(geoip) => setSettings((s) => ({ ...s, geoip }))} /></div>
+            <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">Не блокировать подписку</p><p className="text-xs text-fg-muted">Hiddify берёт последний готовый пул, скан не стартует сам</p></div><Switch checked={settings.subIdle} onCheckedChange={(subIdle) => setSettings((s) => ({ ...s, subIdle }))} /></div>
             <label className="block space-y-1"><span className="text-xs text-fg-muted">URL проверки</span><input value={settings.testUrl} onChange={(e) => setSettings((s) => ({ ...s, testUrl: e.target.value }))} placeholder={DEFAULT_TEST_URL} className="h-10 w-full min-w-0 rounded-md bg-bg-subtle px-3 font-mono text-xs text-fg" /></label>
             <button type="button" onClick={cycleStrategy} className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md bg-bg-subtle px-3 py-2 text-left"><span className="text-sm">Стратегия</span><span className="text-right text-xs text-fg-muted">{strategyLabel}</span></button>
             <p className="text-xs leading-relaxed text-fg-subtle">
@@ -230,7 +284,21 @@ export function Dashboard() {
               <SourcePanel sources={sources} scans={result?.sources ?? []} onChange={setSources} />
             </TabsContent>
             <TabsContent value="pool"><PoolPanel nodes={result?.nodes ?? []} activeId={active?.id ?? null} onPick={(node) => { setActive(node); toast.message(`Выбрано: ${node.host}:${node.port}`); }} /></TabsContent>
-            <TabsContent value="export"><ExportPanel result={result} sources={sources} fmt={settings.exportFmt} n={settings.exportN} real={settings.realProbe && mihomoOk} testUrl={settings.testUrl} onFmt={(exportFmt) => setSettings((s) => ({ ...s, exportFmt }))} onN={(exportN) => setSettings((s) => ({ ...s, exportN }))} /></TabsContent>
+            <TabsContent value="export">
+              <ExportPanel
+                result={result}
+                sources={sources}
+                fmt={settings.exportFmt}
+                n={settings.exportN}
+                real={settings.realProbe && mihomoOk}
+                testUrl={settings.testUrl}
+                scanStrategy={settings.scanStrategy}
+                idle={settings.subIdle}
+                geoip={settings.geoip}
+                onFmt={(exportFmt) => setSettings((s) => ({ ...s, exportFmt }))}
+                onN={(exportN) => setSettings((s) => ({ ...s, exportN }))}
+              />
+            </TabsContent>
           </Tabs>
         </section>
       </main>

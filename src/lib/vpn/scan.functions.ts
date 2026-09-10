@@ -8,6 +8,8 @@ const sourceSchema = z.object({
   enabled: z.boolean(),
 });
 
+const scanStrategySchema = z.enum(["full", "batches", "groups"]);
+
 export const scanSources = createServerFn({ method: "POST" })
   .validator(
     z.object({
@@ -18,9 +20,22 @@ export const scanSources = createServerFn({ method: "POST" })
       real: z.boolean().optional(),
       testUrl: z.string().max(300).optional(),
       force: z.boolean().optional(),
+      scanStrategy: scanStrategySchema.optional(),
+      mode: scanStrategySchema.optional(),
+      geoip: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }) => {
+    const scanStrategy = data.scanStrategy ?? data.mode;
+    const { relayLog } = await import("./log");
+    relayLog("scanSources", {
+      scanStrategy: scanStrategy ?? "full",
+      real: data.real,
+      force: data.force,
+      sources: data.sources.length,
+      perSource: data.perSource,
+      globalCap: data.globalCap,
+    });
     const { runScanCached } = await import("./scan.server");
     return runScanCached(data.sources, {
       perSource: data.perSource,
@@ -29,10 +44,12 @@ export const scanSources = createServerFn({ method: "POST" })
       real: data.real,
       testUrl: data.testUrl,
       force: data.force,
+      scanStrategy,
+      geoip: data.geoip,
     });
   });
 
 export const getProbeCaps = createServerFn({ method: "GET" }).handler(async () => {
-  const { canRunMihomo } = await import("./mihomo-bin.server");
-  return { mihomo: canRunMihomo() };
+  const { canRunMihomo, mihomoInstallDir } = await import("./mihomo-bin.server");
+  return { mihomo: canRunMihomo(), installDir: mihomoInstallDir() };
 });

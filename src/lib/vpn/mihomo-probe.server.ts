@@ -3,12 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_TEST_URL, FALLBACK_TEST_URL } from "./constants";
+import { abortError } from "./abort";
+import { DEFAULT_TEST_URL, FALLBACK_TEST_URL, SCAN_ALIVE_TARGET, SCAN_BATCH_SIZE } from "./constants";
 import { ensureMihomoBinary, canRunMihomo } from "./mihomo-bin.server";
 import { clashProxyObject } from "./mihomo";
-import { registerMihomoChild, unregisterMihomoChild } from "./scan-control.server";
+import { getActiveScanSignal, registerMihomoChild, unregisterMihomoChild } from "./scan-control.server";
 import { endpointKey } from "./parse";
-import type { ParsedNode, ProbedNode } from "./types";
+import type { ParsedNode, ProbedNode, ScanStrategy } from "./types";
 
 const CACHE_MS = 180_000;
 const cache = new Map<string, { at: number; latency: number | null; url: string }>();
@@ -19,6 +20,16 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = lock.then(fn, fn);
   lock = run.then(() => undefined, () => undefined);
   return run;
+}
+
+function throwIfCancelled(): void {
+  if (getActiveScanSignal()?.aborted) throw abortError();
+}
+
+function requestSignal(timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const scan = getActiveScanSignal();
+  return scan ? AbortSignal.any([timeout, scan]) : timeout;
 }
 
 function q(value: string): string { return JSON.stringify(value); }
@@ -72,6 +83,16 @@ function usable(node: ParsedNode): boolean {
 
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
 
+function chunks<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function groupLabel(index: number): string {
+  return `batch-${String(index + 1).padStart(3, "0")}`;
+}
+
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const s = net.createServer();
@@ -85,17 +106,31 @@ function freePort(): Promise<number> {
   });
 }
 
+function pushUrlTestGroup(lines: string[], name: string, testUrl: string, proxyNames: string[]): void {
+  lines.push(`  - name: ${q(name)}`);
+  lines.push(`    type: url-test`);
+  lines.push(`    url: ${q(testUrl)}`);
+  lines.push(`    interval: 86400`);
+  lines.push(`    lazy: false`);
+  lines.push(`    timeout: 4000`);
+  lines.push(`    expected-status: 204`);
+  lines.push(`    proxies:`);
+  for (const proxy of proxyNames) lines.push(`      - ${q(proxy)}`);
+}
+
 function buildProbeYaml(
   named: Array<{ node: ParsedNode; name: string }>,
   testUrl: string,
   apiPort: number,
   mixedPort: number,
+  groupSize?: number,
 ): string {
+  const grouped = Boolean(groupSize && groupSize > 0);
   const lines: string[] = [
     `mixed-port: ${mixedPort}`,
     `bind-address: 127.0.0.1`,
     `allow-lan: false`,
-    `mode: global`,
+    `mode: ${grouped ? "rule" : "global"}`,
     `log-level: error`,
     `ipv6: true`,
     `unified-delay: true`,
@@ -120,23 +155,43 @@ function buildProbeYaml(
     lines.push(`  - name: ${q(name)}`);
     lines.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:")));
   }
-  lines.push(``, `proxy-groups:`, `  - name: "RELAYTEST"`, `    type: url-test`, `    url: ${q(testUrl)}`,
-    `    interval: 86400`, `    lazy: false`, `    timeout: 4000`, `    expected-status: 204`, `    proxies:`);
-  for (const { name } of named) lines.push(`      - ${q(name)}`);
-  lines.push(``, `rules:`, `  - MATCH,RELAYTEST`, ``);
+  lines.push(``, `proxy-groups:`);
+  if (grouped) {
+    chunks(named, groupSize!).forEach((group, i) => {
+      pushUrlTestGroup(lines, groupLabel(i), testUrl, group.map((item) => item.name));
+    });
+    lines.push(``, `rules:`, `  - MATCH,DIRECT`, ``);
+  } else {
+    pushUrlTestGroup(lines, "RELAYTEST", testUrl, named.map((item) => item.name));
+    lines.push(``, `rules:`, `  - MATCH,RELAYTEST`, ``);
+  }
   return lines.join("\n");
 }
 
 async function waitApi(port: number, timeoutMs: number): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    throwIfCancelled();
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/version`, { signal: AbortSignal.timeout(400) });
+      const res = await fetch(`http://127.0.0.1:${port}/version`, { signal: requestSignal(400) });
       if (res.ok) return;
-    } catch { /* retry */ }
+    } catch {
+      throwIfCancelled();
+    }
     await sleep(120);
   }
   throw new Error("Ядро mihomo не подняло API");
+}
+
+function forceKill(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
+  try { child.kill("SIGKILL"); } catch { /* ignore */ }
 }
 
 async function killChild(child: ChildProcess): Promise<void> {
@@ -154,13 +209,13 @@ async function killChild(child: ChildProcess): Promise<void> {
     const onExit = () => finish();
     const onError = () => finish();
     const forceTimer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      forceKill(child);
       setTimeout(finish, 200).unref();
     }, 1200);
     forceTimer.unref();
     child.once("exit", onExit);
     child.once("error", onError);
-    try { child.kill("SIGTERM"); } catch { finish(); }
+    try { child.kill("SIGTERM"); } catch { forceKill(child); finish(); }
   });
 }
 
@@ -168,12 +223,19 @@ function isAliveDelay(delay: unknown): delay is number {
   return typeof delay === "number" && delay > 0 && delay < 65535;
 }
 
-async function groupDelays(apiPort: number, testUrl: string, timeoutMs: number): Promise<Record<string, number>> {
-  const url = new URL(`http://127.0.0.1:${apiPort}/group/RELAYTEST/delay`);
+async function groupDelays(
+  apiPort: number,
+  testUrl: string,
+  timeoutMs: number,
+  group = "RELAYTEST",
+): Promise<Record<string, number>> {
+  throwIfCancelled();
+  const url = new URL(`http://127.0.0.1:${apiPort}/group/${encodeURIComponent(group)}/delay`);
   url.searchParams.set("url", testUrl);
   url.searchParams.set("timeout", String(timeoutMs));
   url.searchParams.set("expected", "204");
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs + 20_000) });
+  const res = await fetch(url, { signal: requestSignal(timeoutMs + 20_000) });
+  throwIfCancelled();
   if (!res.ok) throw new Error(`healthcheck ${res.status}`);
   const data = (await res.json()) as Record<string, unknown>;
   const out: Record<string, number> = {};
@@ -183,7 +245,7 @@ async function groupDelays(apiPort: number, testUrl: string, timeoutMs: number):
 
 async function proxyHistories(apiPort: number): Promise<Record<string, number>> {
   try {
-    const res = await fetch(`http://127.0.0.1:${apiPort}/proxies`, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`http://127.0.0.1:${apiPort}/proxies`, { signal: requestSignal(8000) });
     if (!res.ok) return {};
     const data = (await res.json()) as { proxies?: Record<string, { history?: Array<{ delay?: number }> }> };
     const out: Record<string, number> = {};
@@ -192,21 +254,27 @@ async function proxyHistories(apiPort: number): Promise<Record<string, number>> 
       if (typeof last === "number") out[name] = last;
     }
     return out;
-  } catch { return {}; }
+  } catch {
+    throwIfCancelled();
+    return {};
+  }
 }
 
-async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string, number | null>> {
-  const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` }));
-  const delays = new Map<string, number | null>();
-  for (const node of nodes) delays.set(endpointKey(node), null);
-  if (named.length === 0) return delays;
+type Named = { node: ParsedNode; name: string };
 
+async function spawnMihomo(
+  named: Named[],
+  testUrl: string,
+  groupSize?: number,
+): Promise<{ child: ChildProcess; apiPort: number; dir: string }> {
+  throwIfCancelled();
   const bin = await ensureMihomoBinary();
+  throwIfCancelled();
   const apiPort = await freePort();
   const mixedPort = await freePort();
   const dir = await mkdtemp(path.join(tmpdir(), "relay-probe-"));
   const configPath = path.join(dir, "config.yaml");
-  await writeFile(configPath, buildProbeYaml(named, testUrl, apiPort, mixedPort), "utf8");
+  await writeFile(configPath, buildProbeYaml(named, testUrl, apiPort, mixedPort, groupSize), "utf8");
 
   let stderr = "";
   const child = spawn(bin, ["-d", dir, "-f", configPath], {
@@ -219,20 +287,51 @@ async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string
     if (stderr.length < 4000) stderr += buf.toString("utf8");
   });
 
+  const died = new Promise<never>((_, reject) => {
+    child.on("exit", (code) => reject(new Error(`mihomo вышел (${code ?? "?"})${stderr.trim() ? `: ${stderr.trim().slice(0, 280)}` : ""}`)));
+    child.on("error", reject);
+  });
   try {
-    const died = new Promise<never>((_, reject) => {
-      child.on("exit", (code) => reject(new Error(`mihomo вышел (${code ?? "?"})${stderr.trim() ? `: ${stderr.trim().slice(0, 280)}` : ""}`)));
-      child.on("error", reject);
-    });
     await Promise.race([waitApi(apiPort, 8000), died]);
+  } catch (err) {
+    unregisterMihomoChild(child);
+    await killChild(child);
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    throw err;
+  }
+  return { child, apiPort, dir };
+}
 
+async function applyGroupResult(
+  named: Named[],
+  measured: Record<string, number>,
+  history: Record<string, number>,
+  delays: Map<string, number | null>,
+): void {
+  for (const { node, name } of named) {
+    const delay = measured[name] ?? history[name];
+    delays.set(endpointKey(node), isAliveDelay(delay) ? delay : null);
+  }
+}
+
+function aliveCount(delays: Map<string, number | null>): number {
+  let n = 0;
+  for (const value of delays.values()) if (value !== null) n += 1;
+  return n;
+}
+
+async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string, number | null>> {
+  const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` }));
+  const delays = new Map<string, number | null>();
+  for (const node of nodes) delays.set(endpointKey(node), null);
+  if (named.length === 0) return delays;
+
+  const { child, apiPort, dir } = await spawnMihomo(named, testUrl);
+  try {
     let measured: Record<string, number> = {};
-    try { measured = await groupDelays(apiPort, testUrl, 5000); } catch { measured = {}; }
+    try { measured = await groupDelays(apiPort, testUrl, 5000); } catch { throwIfCancelled(); measured = {}; }
     const history = await proxyHistories(apiPort);
-    for (const { node, name } of named) {
-      const delay = measured[name] ?? history[name];
-      delays.set(endpointKey(node), isAliveDelay(delay) ? delay : null);
-    }
+    applyGroupResult(named, measured, history, delays);
     return delays;
   } finally {
     unregisterMihomoChild(child);
@@ -241,11 +340,79 @@ async function runOnce(nodes: ParsedNode[], testUrl: string): Promise<Map<string
   }
 }
 
+async function runBatches(
+  nodes: ParsedNode[],
+  testUrl: string,
+  batchSize: number,
+  aliveTarget: number,
+): Promise<{ delays: Map<string, number | null>; note: string | null }> {
+  const delays = new Map<string, number | null>();
+  const parts = chunks(nodes, batchSize);
+  for (let i = 0; i < parts.length; i += 1) {
+    throwIfCancelled();
+    const part = await runOnce(parts[i], testUrl);
+    for (const [key, value] of part) delays.set(key, value);
+    if (aliveCount(delays) >= aliveTarget) {
+      return {
+        delays,
+        note: `Пакеты: набрано ${aliveCount(delays)} живых после ${i + 1} из ${parts.length} пачек, дальше не гоняли.`,
+      };
+    }
+  }
+  return { delays, note: null };
+}
+
+async function runGroups(
+  nodes: ParsedNode[],
+  testUrl: string,
+  batchSize: number,
+  aliveTarget: number,
+): Promise<{ delays: Map<string, number | null>; note: string | null }> {
+  const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` }));
+  const delays = new Map<string, number | null>();
+  if (named.length === 0) return { delays, note: null };
+
+  const groups = chunks(named, batchSize);
+  const { child, apiPort, dir } = await spawnMihomo(named, testUrl, batchSize);
+  try {
+    for (let i = 0; i < groups.length; i += 1) {
+      throwIfCancelled();
+      let measured: Record<string, number> = {};
+      try { measured = await groupDelays(apiPort, testUrl, 5000, groupLabel(i)); } catch { throwIfCancelled(); measured = {}; }
+      const history = await proxyHistories(apiPort);
+      applyGroupResult(groups[i], measured, history, delays);
+      if (aliveCount(delays) >= aliveTarget) {
+        return {
+          delays,
+          note: `Группы: набрано ${aliveCount(delays)} живых после ${i + 1} из ${groups.length} групп, процесс не перезапускали.`,
+        };
+      }
+      await sleep(150);
+    }
+    return { delays, note: null };
+  } finally {
+    unregisterMihomoChild(child);
+    await killChild(child);
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+export interface MihomoProbeOpts {
+  strategy?: ScanStrategy;
+  batchSize?: number;
+  aliveTarget?: number;
+}
+
 export async function probeNodesMihomo(
   nodes: ParsedNode[],
   testUrl = DEFAULT_TEST_URL,
+  opts: MihomoProbeOpts = {},
 ): Promise<{ nodes: ProbedNode[]; testUrl: string; note: string | null }> {
   if (!canRunMihomo()) throw new Error("mihomo недоступен");
+  const strategy: ScanStrategy = opts.strategy ?? "full";
+  const batchSize = opts.batchSize ?? SCAN_BATCH_SIZE;
+  const aliveTarget = opts.aliveTarget ?? SCAN_ALIVE_TARGET;
+
   return withLock(async () => {
     const now = Date.now();
     const fresh: ParsedNode[] = [];
@@ -261,19 +428,30 @@ export async function probeNodesMihomo(
     let measured = new Map<string, number | null>();
     let note: string | null = null;
 
+    const run = async (url: string) => {
+      if (strategy === "batches") return runBatches(fresh, url, batchSize, aliveTarget);
+      if (strategy === "groups") return runGroups(fresh, url, batchSize, aliveTarget);
+      return { delays: await runOnce(fresh, url), note: null as string | null };
+    };
+
     if (fresh.length) {
-      measured = await runOnce(fresh, urlUsed);
-      const alive = [...measured.values()].filter((x) => x !== null).length;
-      if (alive === 0 && urlUsed !== FALLBACK_TEST_URL) {
+      const first = await run(urlUsed);
+      measured = first.delays;
+      note = first.note;
+      if (aliveCount(measured) === 0 && urlUsed !== FALLBACK_TEST_URL) {
         urlUsed = FALLBACK_TEST_URL;
         note = "YouTube не ответил, повтор через gstatic";
-        measured = await runOnce(fresh, urlUsed);
+        const second = await run(urlUsed);
+        measured = second.delays;
+        if (second.note) note = `${note}. ${second.note}`;
       }
       const stamp = Date.now();
       for (const node of fresh) {
-        const latency = measured.get(endpointKey(node)) ?? null;
-        cache.set(`${urlUsed}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
-        cache.set(`${testUrl}|${endpointKey(node)}`, { at: stamp, latency, url: urlUsed });
+        const key = endpointKey(node);
+        if (!measured.has(key)) continue;
+        const latency = measured.get(key) ?? null;
+        cache.set(`${urlUsed}|${key}`, { at: stamp, latency, url: urlUsed });
+        cache.set(`${testUrl}|${key}`, { at: stamp, latency, url: urlUsed });
       }
     }
 

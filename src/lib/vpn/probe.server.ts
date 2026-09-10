@@ -1,5 +1,7 @@
 import net from "node:net";
+import { abortError } from "./abort";
 import { endpointKey } from "./parse";
+import { getActiveScanSignal } from "./scan-control.server";
 import type { ParsedNode, ProbedNode } from "./types";
 
 const cache = new Map<string, { at: number; latency: number | null }>();
@@ -24,11 +26,24 @@ export function tcpPing(
       resolve(ms);
     };
 
+    const signal = getActiveScanSignal();
+    const onAbort = () => finish(null);
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     const socket = net.connect({ host, port, family: 0 });
     socket.setTimeout(timeoutMs);
-    socket.once("connect", () => finish(Date.now() - start));
-    socket.once("timeout", () => finish(null));
-    socket.once("error", () => finish(null));
+    socket.once("connect", () => {
+      signal?.removeEventListener("abort", onAbort);
+      finish(Date.now() - start);
+    });
+    socket.once("timeout", () => {
+      signal?.removeEventListener("abort", onAbort);
+      finish(null);
+    });
+    socket.once("error", () => {
+      signal?.removeEventListener("abort", onAbort);
+      finish(null);
+    });
   });
 }
 
@@ -41,6 +56,7 @@ async function mapPool<T, R>(
   let i = 0;
   async function worker() {
     while (i < items.length) {
+      if (getActiveScanSignal()?.aborted) throw abortError();
       const idx = i++;
       out[idx] = await fn(items[idx]);
     }
@@ -56,6 +72,7 @@ export async function probeNodes(
 ): Promise<ProbedNode[]> {
   const now = Date.now();
   return mapPool(nodes, 18, async (node) => {
+    if (getActiveScanSignal()?.aborted) throw abortError();
     const key = endpointKey(node);
     const hit = cache.get(key);
     if (hit && now - hit.at < CACHE_MS) {

@@ -8,13 +8,12 @@ import { buildMihomoYaml, buildUriList } from "@/lib/vpn/mihomo";
 import {
   EMPTY_FILTERS,
   PROTOCOL_OPTIONS,
-  filterSubscriptionNodes,
   filteredAliveCount,
   filtersToSearchParams,
   type SubscriptionFilters,
 } from "@/lib/vpn/subscription-filter";
 import { pickExportNodes } from "@/lib/vpn/select";
-import type { ExportFormat, ScanResult, SourceDef, VpnProtocol } from "@/lib/vpn/types";
+import type { ExportFormat, ScanResult, ScanStrategy, SourceDef } from "@/lib/vpn/types";
 
 const FMT_OPTIONS: Array<{ id: ExportFormat; label: string; hint: string }> = [
   { id: "b64", label: "b64", hint: "Hiddify" },
@@ -35,6 +34,9 @@ export function ExportPanel({
   n,
   real,
   testUrl,
+  scanStrategy,
+  idle,
+  geoip,
   onFmt,
   onN,
 }: {
@@ -44,6 +46,9 @@ export function ExportPanel({
   n: number;
   real: boolean;
   testUrl: string;
+  scanStrategy: ScanStrategy;
+  idle: boolean;
+  geoip: boolean;
   onFmt: (fmt: ExportFormat) => void;
   onN: (n: number) => void;
 }) {
@@ -97,10 +102,13 @@ export function ExportPanel({
     params.set("fmt", fmt);
     params.set("n", String(n));
     params.set("real", real ? "1" : "0");
+    params.set("sm", scanStrategy);
+    if (idle) params.set("idle", "1");
+    if (!geoip) params.set("geoip", "0");
     if (testUrl) params.set("test", testUrl);
     filtersToSearchParams(params, filters);
     return `/api/sub?${params.toString()}`;
-  }, [enabled, fmt, n, real, testUrl, filters]);
+  }, [enabled, fmt, n, real, testUrl, scanStrategy, idle, geoip, filters]);
 
   const exportNodes = result ? pickExportNodes(result, n, filters) : [];
   const yaml = result ? buildMihomoYaml(exportNodes, result.sources) : "";
@@ -108,7 +116,7 @@ export function ExportPanel({
 
   async function copy(label: string, text: string) {
     if (!text) {
-      toast.error("Сначала нажмите «Обновить пул»");
+      toast.error("Сначала нажмите «Сканировать»");
       return;
     }
     await navigator.clipboard.writeText(text);
@@ -119,7 +127,7 @@ export function ExportPanel({
 
   function downloadYaml() {
     if (!yaml) {
-      toast.error("Сначала нажмите «Обновить пул»");
+      toast.error("Сначала нажмите «Сканировать»");
       return;
     }
     const blob = new Blob([yaml], { type: "text/yaml;charset=utf-8" });
@@ -244,8 +252,10 @@ export function ExportPanel({
                 <div className="flex min-w-0 items-center gap-2">
                   <ShieldCheck className="size-4 shrink-0" />
                   <div>
-                    <p className="text-sm font-medium">Только whitelist-совместимые</p>
-                    <p className="text-[11px] text-fg-muted">SNI/host из статического списка доменов или CIDR.</p>
+                    <p className="text-sm font-medium">Только «белые» SNI</p>
+                    <p className="text-[11px] leading-relaxed text-fg-muted">
+                      Берёт ноды, у которых SNI или host — yandex, vk, gosuslugi и другие из списка. Это маскировка Reality, а не проверка, что через сервер открывается Яндекс.
+                    </p>
                   </div>
                 </div>
                 <Switch checked={filters.whitelistOnly} onCheckedChange={(checked) => setFilters((current) => ({ ...current, whitelistOnly: checked }))} />
@@ -258,7 +268,7 @@ export function ExportPanel({
                   <ShieldOff className="size-4 shrink-0" />
                   <div>
                     <p className="text-sm font-medium">Исключить чёрные списки</p>
-                    <p className="text-[11px] text-fg-muted">Статический список + ваши домены/CIDR.</p>
+                    <p className="text-[11px] text-fg-muted">По SNI/host и CIDR сервера. Свои домены — строками ниже.</p>
                   </div>
                 </div>
                 <Switch checked={filters.blacklistEnabled} onCheckedChange={(checked) => setFilters((current) => ({ ...current, blacklistEnabled: checked }))} />
@@ -267,7 +277,7 @@ export function ExportPanel({
                 value={filters.blacklistEntries.join("\n")}
                 onChange={(event) => setFilters((current) => ({ ...current, blacklistEntries: event.target.value.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean) }))}
                 rows={3}
-                placeholder="example.com\n203.0.113.0/24"
+                placeholder={"example.com\n203.0.113.0/24"}
                 className="mt-3 min-h-20 w-full resize-y rounded-lg bg-bg-subtle px-3 py-2 font-mono text-xs text-fg outline-none ring-0 placeholder:text-fg-subtle"
               />
             </div>
@@ -286,15 +296,22 @@ export function ExportPanel({
         </div>
       </div>
 
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-border">
+        <p className="text-sm font-medium">Пока Relay запущен — подписка живая</p>
+        <p className="mt-1 text-sm leading-relaxed text-fg-muted">
+          Hiddify и Clash ходят сюда за свежим списком. Если закрыть это окно или выключить компьютер, ссылка перестанет отвечать. С телефона не используйте localhost: нужен LAN IP ПК в той же Wi‑Fi сети и разрешённый входящий TCP 8080 в брандмауэре.
+        </p>
+      </div>
+
       <div className="rounded-xl bg-surface p-4 shadow-border">
         <p className="text-sm font-medium">Живая подписка</p>
         <p className="mt-1 text-sm text-fg-muted">
           Готовая ссылка для Hiddify: New Profile → Add from clipboard. Формат,
-          количество и фильтры сразу вшиты в URL.
+          количество, режим скана и фильтры сразу вшиты в URL.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" onClick={() => setHostMode("auto")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "auto" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>Авто</button>
-          <button type="button" onClick={() => setHostMode("localhost")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "localhost" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>localhost</button>
+          <button type="button" onClick={() => setHostMode("localhost")} className={`h-9 rounded-md px-3 text-xs ${hostMode === "localhost" ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>Этот ПК</button>
           {lanIps.map((ip) => (
             <button
               key={ip}
@@ -302,10 +319,15 @@ export function ExportPanel({
               onClick={() => { setSelectedLanIp(ip); setHostMode("lan"); }}
               className={`h-9 rounded-md px-3 font-mono text-xs ${hostMode === "lan" && selectedLanIp === ip ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}
             >
-              {ip}
+              {ip} · телефон
             </button>
           ))}
         </div>
+        {hostMode === "lan" ? (
+          <p className="mt-2 text-xs text-fg-muted">Телефон и ПК должны быть в одной сети. localhost с телефона не работает.</p>
+        ) : (
+          <p className="mt-2 text-xs text-fg-muted">Для Hiddify на этом компьютере достаточно localhost.</p>
+        )}
         <div className="mt-2 flex flex-wrap gap-2">
           {FMT_OPTIONS.map((opt) => (
             <button key={opt.id} type="button" onClick={() => onFmt(opt.id)} className={`h-9 rounded-md px-3 text-xs ${fmt === opt.id ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>
@@ -326,6 +348,7 @@ export function ExportPanel({
         <div className="mt-1 text-xs text-fg-subtle">
           Адрес подписки: <span className="font-mono">{selectedHost}</span>
           {hostMode === "lan" && !selectedLanIp ? " · LAN IPv4 не найден" : ""}
+          {idle ? " · без автоскана" : ""}
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button type="button" onClick={() => { if (!subUrl) { toast.error("Добавьте источник"); return; } void copy("sub", subUrl); }}>

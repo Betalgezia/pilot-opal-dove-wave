@@ -1,14 +1,23 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, inflateRawSync } from "node:zlib";
 import { MIHOMO_VERSION } from "./constants";
 
-const CACHE_DIR = path.join(tmpdir(), "relay-mihomo");
+export function mihomoInstallDir(): string {
+  if (process.env.RELAY_MIHOMO_DIR) return process.env.RELAY_MIHOMO_DIR;
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || path.join(homedir(), "AppData", "Local");
+    return path.join(local, "Relay");
+  }
+  return path.join(process.cwd(), ".relay-cache", "mihomo");
+}
+
+const CACHE_DIR = mihomoInstallDir();
 const BIN_NAME = process.platform === "win32" ? "mihomo.exe" : "mihomo";
 const BIN_PATH = path.join(CACHE_DIR, BIN_NAME);
 const STAMP_PATH = path.join(CACHE_DIR, "version");
