@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProbedNode } from "./types";
@@ -32,12 +33,7 @@ let loaded = false;
 let persistTimer: NodeJS.Timeout | null = null;
 
 export function qualityHistoryKey(node: Pick<ProbedNode, "id">): string {
-  let hash = 2166136261;
-  for (let i = 0; i < node.id.length; i += 1) {
-    hash ^= node.id.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return createHash("sha256").update(node.id, "utf8").digest("hex").slice(0, 16);
 }
 
 function normalizeTargetHistory(value: unknown): Record<string, TargetHistory> {
