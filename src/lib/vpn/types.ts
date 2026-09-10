@@ -52,6 +52,7 @@ export interface ParsedNode {
 export interface ProbedNode extends ParsedNode {
   latency: number | null;
   alive: boolean;
+  tested?: boolean;
 }
 
 export interface SourceScan {

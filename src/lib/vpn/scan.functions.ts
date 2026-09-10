@@ -21,10 +21,21 @@ export const scanSources = createServerFn({ method: "POST" })
       testUrl: z.string().max(300).optional(),
       force: z.boolean().optional(),
       scanStrategy: scanStrategySchema.optional(),
+      mode: scanStrategySchema.optional(),
       geoip: z.boolean().optional(),
     }),
   )
   .handler(async ({ data }) => {
+    const scanStrategy = data.scanStrategy ?? data.mode;
+    const { relayLog } = await import("./log");
+    relayLog("scanSources", {
+      scanStrategy: scanStrategy ?? "full",
+      real: data.real,
+      force: data.force,
+      sources: data.sources.length,
+      perSource: data.perSource,
+      globalCap: data.globalCap,
+    });
     const { runScanCached } = await import("./scan.server");
     return runScanCached(data.sources, {
       perSource: data.perSource,
@@ -33,7 +44,7 @@ export const scanSources = createServerFn({ method: "POST" })
       real: data.real,
       testUrl: data.testUrl,
       force: data.force,
-      scanStrategy: data.scanStrategy,
+      scanStrategy,
       geoip: data.geoip,
     });
   });
