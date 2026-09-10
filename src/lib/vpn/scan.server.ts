@@ -5,7 +5,7 @@ import { enrichNodesWithGeoIp } from "./geoip.server";
 import { endpointKey, parseSubscription } from "./parse";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
-import { getQualityHistory, recordQualityResults } from "./quality-history.server";
+import { getQualityHistory, qualityHistoryKey, recordQualityResults } from "./quality-history.server";
 import { pickDeepVerification, QUALITY_TARGETS, rankNodes, scoreNode } from "./quality";
 import { pickExportNodes } from "./select";
 import { beginScan, endScan, getActiveScanSignal } from "./scan-control.server";
@@ -191,7 +191,7 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
 
   const qualityStart = Date.now();
   const now = Date.now();
-  probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(node.id), now) }));
+  probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(qualityHistoryKey(node)), now) }));
   const qualityMs = Date.now() - qualityStart;
   await recordQualityResults(probed);
 
