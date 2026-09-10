@@ -43,6 +43,8 @@ export function PoolPanel({
       <ul className="divide-y divide-border overflow-hidden rounded-xl bg-surface shadow-border">
         {filtered.map((node) => {
           const selected = node.id === activeId;
+          const score = node.qualityScore ?? 0;
+          const confidence = node.confidence ?? 0;
           return (
             <li key={node.id}>
               <button
@@ -71,14 +73,17 @@ export function PoolPanel({
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <Badge variant="proto">{node.protocol}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="proto">{node.protocol}</Badge>
+                    {node.alive && <span className="font-mono text-[10px] text-fg-muted">Q{score}</span>}
+                  </div>
                   <span
                     className={cn(
                       "font-mono text-xs tabular-nums",
                       node.alive ? "text-fg" : "text-fg-subtle",
                     )}
                   >
-                    {node.alive ? formatMs(node.latency) : "timeout"}
+                    {node.alive ? `${formatMs(node.latency)} · ${confidence}%` : "timeout"}
                   </span>
                 </div>
               </button>
@@ -86,6 +91,11 @@ export function PoolPanel({
           );
         })}
       </ul>
+      {filtered.length === 0 && (
+        <p className="rounded-lg bg-surface px-4 py-6 text-center text-sm text-fg-muted shadow-border">
+          Ничего не найдено.
+        </p>
+      )}
     </div>
   );
 }
