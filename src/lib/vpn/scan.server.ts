@@ -5,7 +5,7 @@ import { enrichNodesWithGeoIp } from "./geoip.server";
 import { endpointKey, parseSubscription } from "./parse";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
-import { getQualityHistory, recordQualityResults } from "./quality-history.server";
+import { getQualityHistory, qualityHistoryKey, recordQualityResults } from "./quality-history.server";
 import { pickDeepVerification, QUALITY_TARGETS, rankNodes, scoreNode } from "./quality";
 import { pickExportNodes } from "./select";
 import { beginScan, endScan, getActiveScanSignal } from "./scan-control.server";
@@ -20,12 +20,11 @@ const scanLocks = new Map<string, Promise<ScanResult>>();
 function scanKey(sources: SourceDef[], opts: ScanOpts): string { return JSON.stringify({ sources: sources.filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.name, url: s.url })).sort((a, b) => a.id.localeCompare(b.id)), perSource: opts.perSource ?? 16, globalCap: opts.globalCap ?? 64, timeoutMs: opts.timeoutMs ?? 2200, real: opts.real !== false, testUrl: opts.testUrl || DEFAULT_TEST_URL }); }
 function throwIfCancelled(): void { if (getActiveScanSignal()?.aborted) throw new DOMException("Сканирование остановлено", "AbortError"); }
 function countTargetChecks(nodes: ProbedNode[]): number { return nodes.reduce((sum, node) => sum + Object.keys(node.targetResults ?? {}).length, 0); }
-function unknownNodes(nodes: ProbedNode[]): ProbedNode[] { return nodes.map((node) => ({ ...node, latency: null, alive: false, probeState: "unknown" as const })); }
+function unknownNodes(nodes: ParsedNode[]): ProbedNode[] { return nodes.map((node) => ({ ...node, latency: null, alive: false, probeState: "unknown" as const })); }
 function mergeProbeNote(base: string | null, extra: string): string { return base ? `${base} · ${extra}` : extra; }
 
 export async function runScanCached(sources: SourceDef[], opts: ScanOpts = {}): Promise<ScanResult> {
-  const key = scanKey(sources, opts); const now = Date.now(); const cached = scanCache.get(key);
-  if (!opts.force && cached && now - cached.at < SCAN_CACHE_MS) return cached.result;
+  const key = scanKey(sources, opts); const now = Date.now(); const cached = scanCache.get(key); if (!opts.force && cached && now - cached.at < SCAN_CACHE_MS) return cached.result;
   const pending = scanLocks.get(key); if (pending) return pending;
   const controller = beginScan(); const promise = runScan(sources, opts).then((result) => { scanCache.set(key, { at: Date.now(), result }); return result; }); scanLocks.set(key, promise);
   try { return await promise; } finally { endScan(controller); if (scanLocks.get(key) === promise) scanLocks.delete(key); }
@@ -46,11 +45,9 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
       try { const { probeNodesMihomo } = await import("./mihomo-probe.server"); const real = await probeNodesMihomo(sampled, opts?.testUrl || DEFAULT_TEST_URL); probed = real.nodes; testUrl = real.testUrl; probeNote = real.note; mihomoLoaded = real.metrics.mihomoLoaded; mihomoDelayReceived = real.metrics.mihomoDelayReceived; unknown = real.metrics.unknown; }
       catch (err) { probed = unknownNodes(sampled); unknown = probed.length; probeNote = `Проверка mihomo не завершилась: ${err instanceof Error ? err.message : "неизвестная ошибка"}. Узлы отмечены как неизвестные; TCP не используется как замена.`; }
     }
-  } else {
-    probed = await probeNodes(sampled, timeoutMs); mihomoLoaded = 0; mihomoDelayReceived = 0; unknown = probed.filter((n) => n.probeState === "unknown").length; probeNote = "Режим без mihomo: проверяется только TCP-порт, это не подтверждение работоспособности VPN.";
-  }
-  const probeMs = Date.now() - probeStart;
-  throwIfCancelled(); const geoStart = Date.now(); probed = await enrichNodesWithGeoIp(probed); const geoIpMs = Date.now() - geoStart; throwIfCancelled();
+  } else { probed = await probeNodes(sampled, timeoutMs); unknown = probed.filter((n) => n.probeState === "unknown").length; probeNote = "Режим без mihomo: проверяется только TCP-порт, это не подтверждение работоспособности VPN."; }
+  const probeMs = Date.now() - probeStart; throwIfCancelled();
+  const geoStart = Date.now(); probed = await enrichNodesWithGeoIp(probed); const geoIpMs = Date.now() - geoStart; throwIfCancelled();
 
   const deepStart = Date.now();
   if (probeMode === "mihomo" && probed.some((node) => node.alive)) {
@@ -58,10 +55,9 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
     catch (err) { probeNote = mergeProbeNote(probeNote, err instanceof Error ? `Дополнительная проверка ресурсов пропущена: ${err.message}` : "Дополнительная проверка ресурсов пропущена"); }
   }
   const deepVerifyMs = Date.now() - deepStart; throwIfCancelled();
-  const qualityStart = Date.now(); const now = Date.now(); probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(node.id), now) })); const qualityMs = Date.now() - qualityStart; await recordQualityResults(probed.filter((n) => n.probeState === "checked"));
+  const qualityStart = Date.now(); const now = Date.now(); probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(qualityHistoryKey(node)), now) })); const qualityMs = Date.now() - qualityStart; await recordQualityResults(probed.filter((n) => n.probeState === "checked"));
 
   const sourcesOut: SourceScan[] = fetched.map((f) => { const mine = probed.filter((n) => n.sourceId === f.source.id); const alive = mine.filter((n) => n.alive); const latencies = alive.map((n) => n.latency).filter((x): x is number => x !== null); return { id: f.source.id, name: f.source.name, url: f.source.url, ok: f.error === null, error: f.error, parsed: f.nodes.length, unique: new Set(f.nodes.map((n) => n.id)).size, probed: mine.length, alive: alive.length, bestLatency: latencies.length ? Math.min(...latencies) : null }; });
-  const ranked = rankNodes(probed); const totalMs = Date.now() - started;
-  const metrics: ScanMetrics = { fetchMs: Math.max(fetchWallMs, fetched.reduce((sum, item) => sum + item.fetchMs, 0)), parseMs: fetched.reduce((sum, item) => sum + item.parseMs, 0), sampleMs, probeMs, geoIpMs, deepVerifyMs, qualityMs, totalMs, sampled: sampled.length, deepVerified: ranked.filter((node) => Object.keys(node.targetResults ?? {}).length > 0).length, targetChecks: countTargetChecks(ranked), mihomoLoaded, mihomoDelayReceived, unknown };
+  const ranked = rankNodes(probed); const totalMs = Date.now() - started; const metrics: ScanMetrics = { fetchMs: Math.max(fetchWallMs, fetched.reduce((sum, item) => sum + item.fetchMs, 0)), parseMs: fetched.reduce((sum, item) => sum + item.parseMs, 0), sampleMs, probeMs, geoIpMs, deepVerifyMs, qualityMs, totalMs, sampled: sampled.length, deepVerified: ranked.filter((node) => Object.keys(node.targetResults ?? {}).length > 0).length, targetChecks: countTargetChecks(ranked), mihomoLoaded, mihomoDelayReceived, unknown };
   return { scannedAt: Date.now(), durationMs: totalMs, sources: sourcesOut, nodes: ranked, parsedTotal: allNodes.length, uniqueTotal, probeMode, testUrl, probeNote, metrics };
 }
