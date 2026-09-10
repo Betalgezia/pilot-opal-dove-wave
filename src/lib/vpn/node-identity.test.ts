@@ -4,29 +4,11 @@ import { mergeNodesByIdentity, nodeIdentityKey } from "./node-identity.ts";
 import type { ParsedNode } from "./types.ts";
 
 function node(sourceId: string, name: string, extra: Partial<ParsedNode> = {}): ParsedNode {
-  return {
-    id: `${sourceId}-${name}`,
-    uri: `vless://uuid@example.com:443?type=ws#${name}`,
-    protocol: "vless",
-    name,
-    host: "example.com",
-    port: 443,
-    country: null,
-    sourceId,
-    sourceName: sourceId,
-    uuid: "uuid",
-    network: "ws",
-    security: "tls",
-    path: "/",
-    hostHeader: "cdn.example.com",
-    extra: {},
-    ...extra,
-  };
+  return { id: `${sourceId}-${name}`, uri: `vless://uuid@example.com:443?type=ws#${name}`, protocol: "vless", name, host: "example.com", port: 443, country: null, sourceId, sourceName: sourceId, uuid: "uuid", network: "ws", security: "tls", path: "/", extra: {}, ...extra };
 }
 
 test("identity key ignores remark and differs by transport/tls", () => {
-  const a = node("a", "one");
-  const b = node("b", "two");
+  const a = node("a", "one"); const b = node("b", "two");
   assert.equal(nodeIdentityKey(a), nodeIdentityKey(b));
   assert.notEqual(nodeIdentityKey(a), nodeIdentityKey({ ...a, network: "grpc", serviceName: "svc" }));
   assert.notEqual(nodeIdentityKey(a), nodeIdentityKey({ ...a, security: "none" }));
