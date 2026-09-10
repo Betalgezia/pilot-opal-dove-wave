@@ -7,7 +7,7 @@ const sourceSchema = z.object({
   url: z.string().min(8).max(500),
   enabled: z.boolean(),
 });
-const emptyInput = z.object({});
+const emptyInput = z.object({}).optional();
 
 export const scanSources = createServerFn({ method: "POST" })
   .validator(
