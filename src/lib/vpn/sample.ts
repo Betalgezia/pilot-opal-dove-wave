@@ -49,7 +49,6 @@ function sourceSamplingFactor(nodes: ParsedNode[], history: Map<string, NodeQual
   const known = nodes.map((n) => history.get(n.id)).filter((x): x is NodeQualityHistory => Boolean(x && x.samples > 0));
   if (known.length < 8) return 1;
   const reliability = known.reduce((sum, h) => sum + h.successes / h.samples, 0) / known.length;
-  // Difficult sources get more exploration; reliable sources can lean on their history.
   return Math.max(0.75, Math.min(1.5, 1.5 - reliability * 0.75));
 }
 
@@ -70,8 +69,8 @@ function priority(node: ParsedNode, history: Map<string, NodeQualityHistory>, se
   return reliability * 0.5 + latency * 0.25 + streak * 0.15 + recencyWeight(h, seed) * 0.1;
 }
 
-function diversityKey(node: ParsedNode): string {
-  const country = (node.country ?? "XX").toUpperCase();
+function diversityKey(node: ParsedNode, history: Map<string, NodeQualityHistory>): string {
+  const country = (node.country ?? history.get(node.id)?.country ?? "XX").toUpperCase();
   const raw = node.serverIp || node.host;
   const ip = raw.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (ip) return `${country}|${ip[1]}.${ip[2]}.${ip[3]}`;
@@ -97,28 +96,27 @@ function smartSample(
     out.push(node);
   };
 
-  // Preserve the historically strong core first.
   const eliteCount = Math.min(count, Math.max(1, Math.ceil(count * 0.4)));
   for (const node of ranked.slice(0, eliteCount)) take(node);
 
-  // Then deliberately spread across countries and /24-like buckets.
   const buckets = new Map<string, ParsedNode[]>();
   for (const node of list) {
-    const key = diversityKey(node);
+    const key = diversityKey(node, history);
     const bucket = buckets.get(key) ?? [];
     bucket.push(node);
     buckets.set(key, bucket);
   }
   const bucketQueue = [...buckets.values()].sort((a, b) => {
-    const pa = priority(a[0], history, seed);
-    const pb = priority(b[0], history, seed);
+    const pa = Math.max(...a.map((node) => priority(node, history, seed)));
+    const pb = Math.max(...b.map((node) => priority(node, history, seed)));
     return pb - pa;
   });
+  const sortedBuckets = bucketQueue.map((bucket) => [...bucket].sort((a, b) => priority(b, history, seed) - priority(a, history, seed)));
   let round = 0;
-  while (out.length < count && bucketQueue.length) {
+  while (out.length < count && sortedBuckets.length) {
     let added = false;
-    for (const bucket of bucketQueue) {
-      const candidate = [...bucket].sort((a, b) => priority(b, history, seed) - priority(a, history, seed))[round];
+    for (const bucket of sortedBuckets) {
+      const candidate = bucket[round];
       if (candidate) {
         take(candidate);
         added = true;
@@ -129,11 +127,10 @@ function smartSample(
     round += 1;
   }
 
-  // Final fill: even spread over the source, keeping cold-start exploration alive.
   if (out.length < count) {
+    const stride = list.length / Math.max(1, count);
     for (let i = 0; i < list.length && out.length < count; i += 1) {
-      const index = Math.floor((i * list.length) / Math.max(1, count));
-      take(list[Math.min(list.length - 1, index)]);
+      take(list[Math.min(list.length - 1, Math.floor(i * stride))]);
     }
   }
   return out.slice(0, count);
