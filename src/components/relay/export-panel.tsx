@@ -69,7 +69,7 @@ export function ExportPanel({ result, sources, fmt, n, real, testUrl, onFmt, onN
   useEffect(() => {
     if (!filtersLoaded) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => { void savePanelFilters({ ...filters, testUrl }); }, 500);
+    saveTimer.current = window.setTimeout(() => { void savePanelFilters({ data: { ...filters, testUrl } }); }, 500);
     return () => { if (saveTimer.current !== null) window.clearTimeout(saveTimer.current); };
   }, [filters, testUrl, filtersLoaded]);
 
@@ -145,12 +145,16 @@ export function ExportPanel({ result, sources, fmt, n, real, testUrl, onFmt, onN
         <div className="mt-2 flex flex-wrap gap-2">{N_OPTIONS.map((count) => <button key={count} type="button" onClick={() => onN(count)} className={`h-9 min-w-11 rounded-md px-3 font-mono text-xs ${n === count ? "bg-primary text-primary-foreground" : "bg-bg-subtle text-fg-muted"}`}>{count}</button>)}</div>
         <pre className="mt-3 max-h-24 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted">{panelUrl || "Добавьте хотя бы один источник"}</pre>
         <div className="mt-1 text-xs text-fg-subtle">Адрес подписки: <span className="font-mono">{selectedHost}</span> · фильтры: <span className="font-medium text-fg">панель</span></div>
-        <div className="mt-3 flex flex-wrap gap-2"><Button type="button" onClick={() => copy("sub", panelUrl)}>{copied === "sub" ? <Check /> : <Copy />}Скопировать URL</Button><Button type="button" variant="secondary" onClick={() => copy("frozen", frozenUrl)}>{copied === "frozen" ? <Check /> : <Copy />}Скопировать ссылку с текущими фильтрами в URL</Button></div>
+        <div className="mt-3 flex flex-wrap gap-2"><Button type="button" onClick={() => copy("sub", panelUrl)}>{copied === "sub" ? <Check /> : <Copy />}Скопировать URL</Button><Button type="button" variant="secondary" onClick={downloadYaml} disabled={!yaml}><Download />Скачать YAML</Button></div>
       </div>
 
-      <div className="rounded-xl bg-surface p-4 shadow-border"><p className="text-sm font-medium">Файл для компьютера</p><p className="mt-1 text-sm text-fg-muted">YAML и URI используют текущие фильтры. Изменение фильтров не запускает новое сканирование.</p><div className="mt-3 flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={downloadYaml}><Download />Скачать relay.yaml</Button><Button type="button" variant="secondary" onClick={() => copy("yaml", yaml)}>{copied === "yaml" ? <Check /> : <Copy />}Скопировать YAML</Button><Button type="button" variant="secondary" onClick={() => copy("uri", uris)}>{copied === "uri" ? <Check /> : <Copy />}Скопировать URI</Button></div></div>
-
-      <p className="text-xs text-fg-subtle">URL проверки сохраняется вместе с фильтрами. После его изменения нажмите «Обновить пул», чтобы выполнить новую проверку; сама подписка затем возьмёт сохранённый URL.</p>
+      <div className="rounded-xl bg-surface p-4 shadow-border">
+        <p className="text-sm font-medium">Зафиксированная ссылка</p>
+        <p className="mt-1 text-sm text-fg-muted">Эта ссылка сохраняет текущие фильтры прямо в URL.</p>
+        <pre className="mt-3 max-h-24 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted">{frozenUrl || "Добавьте хотя бы один источник"}</pre>
+        <div className="mt-3"><Button type="button" onClick={() => copy("frozen", frozenUrl)}>{copied === "frozen" ? <Check /> : <Copy />}Скопировать фиксированную ссылку</Button></div>
+        {uris && <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-bg-subtle p-3 font-mono text-xs break-all whitespace-pre-wrap text-fg-muted">{uris}</pre>}
+      </div>
     </div>
   );
 }
