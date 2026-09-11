@@ -1,4 +1,4 @@
-import { relayLogger } from "@/lib/relay/logger";
+import { relayLogger } from "../relay/logger";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
