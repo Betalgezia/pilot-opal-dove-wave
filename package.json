@@ -16,7 +16,8 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/vpn/quality.test.ts src/lib/vpn/parse.test.ts src/lib/vpn/mihomo.test.ts src/lib/vpn/node-identity.test.ts",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
