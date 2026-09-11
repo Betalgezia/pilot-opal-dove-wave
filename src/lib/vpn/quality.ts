@@ -48,6 +48,14 @@ function targetScore(targetResults: Record<string, boolean> | undefined): number
   return (successes / checked.length) * 20;
 }
 
+function historicalTargetScore(history: NodeQualityHistory | undefined): number {
+  if (!history) return 0;
+  const targets = Object.values(history.targets ?? {}).filter((target) => target.checks > 0);
+  if (targets.length === 0) return 0;
+  const reliability = targets.reduce((sum, target) => sum + target.successes / target.checks, 0) / targets.length;
+  return clamp(reliability * 10, 0, 10);
+}
+
 export function scoreNode(
   node: ProbedNode,
   history: NodeQualityHistory | undefined,
@@ -60,7 +68,7 @@ export function scoreNode(
     : node.alive ? 70 : 5;
   const score = node.alive
     ? Math.round(clamp(
-        latencyScore(node.latency) + stable + targetScore(node.targetResults) + confidence * 0.15,
+        latencyScore(node.latency) + stable + targetScore(node.targetResults) + historicalTargetScore(history) + confidence * 0.15,
         0,
         100,
       ))
