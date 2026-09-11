@@ -1,11 +1,10 @@
-import QRCode from "qrcode";
 import { Check, Copy, Download, Link2, QrCode, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { encodeSourceParam } from "@/lib/vpn/github";
-import { buildMihomoYaml, buildUriList } from "@/lib/vpn/mihomo";
+import { buildMihomoYaml } from "@/lib/vpn/mihomo";
 import { getPanelFilters, savePanelFilters } from "@/lib/vpn/panel-filters.functions";
 import { EMPTY_FILTERS, PROTOCOL_OPTIONS, filteredAliveCount, type SubscriptionFilters } from "@/lib/vpn/subscription-filter";
 import { pickExportNodes } from "@/lib/vpn/select";
@@ -34,7 +33,8 @@ export function ExportPanel({ result, sources, fmt, n, real, testUrl, onFmt, onN
   const filteredCount = result ? filteredAliveCount(result.nodes, filters) : 0;
   const exportNodes = result ? pickExportNodes(result, n, filters) : [];
   const yaml = result ? buildMihomoYaml(exportNodes, result.sources) : "";
-  useEffect(() => { let cancelled = false; if (!panelUrl) { setQr(""); return; } QRCode.toDataURL(panelUrl, { width: 320, margin: 2, errorCorrectionLevel: "M" }).then((url) => { if (!cancelled) setQr(url); }).catch(() => { if (!cancelled) setQr(""); }); return () => { cancelled = true; }; }, [panelUrl]);
+  const qrUrl = panelUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=8&data=${encodeURIComponent(panelUrl)}` : "";
+  useEffect(() => { setQr(qrUrl); }, [qrUrl]);
   async function copy(text: string) { if (!text) { toast.error("Сначала выполните сканирование"); return; } await navigator.clipboard.writeText(text); setCopied(true); toast.success("Ссылка скопирована"); window.setTimeout(() => setCopied(false), 1500); }
   function download(text: string, filename: string, mime: string) { if (!text) { toast.error("Сначала выполните сканирование"); return; } const blob = new Blob([text], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); }
   function resetFilters() { setFilters({ ...EMPTY_FILTERS, blacklistEntries: [] }); }
@@ -47,7 +47,7 @@ export function ExportPanel({ result, sources, fmt, n, real, testUrl, onFmt, onN
           <div className="mt-5 grid gap-3 sm:grid-cols-2"><div><p className="mb-2 text-xs font-medium text-fg-muted">Формат</p><div className="flex flex-wrap gap-2">{FMT_OPTIONS.map((opt) => <button key={opt.id} type="button" onClick={() => onFmt(opt.id)} className={`rounded-lg border px-3 py-2 text-xs ${fmt === opt.id ? "border-primary bg-primary text-primary-foreground" : "border-border bg-bg-subtle text-fg-muted hover:text-fg"}`}>{opt.label}<span className="ml-1 opacity-60">{opt.hint}</span></button>)}</div></div><div><p className="mb-2 text-xs font-medium text-fg-muted">Количество</p><div className="flex flex-wrap gap-2">{N_OPTIONS.map((count) => <button key={count} type="button" onClick={() => onN(count)} className={`rounded-lg border px-3 py-2 font-mono text-xs ${n === count ? "border-primary bg-primary text-primary-foreground" : "border-border bg-bg-subtle text-fg-muted hover:text-fg"}`}>{count}</button>)}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-fg-muted"><span><b className="text-fg">{alive}</b> live</span><span><b className="text-fg">{filteredCount}</b> проходят фильтры</span><span>выбрано <b className="text-fg">{exportNodes.length}</b></span></div>
         </div>
-        <div className="flex min-h-[180px] items-center justify-center rounded-xl bg-white p-3">{qr ? <img src={qr} alt="QR-код подписки Relay" className="size-40" /> : <div className="text-center text-xs text-fg-subtle"><QrCode className="mx-auto mb-2 size-8" /><p>QR появится<br />после сканирования</p></div>}</div>
+        <div className="flex min-h-[180px] items-center justify-center rounded-xl bg-white p-3">{qr ? <img src={qr} alt="QR-код подписки Relay" className="size-40" loading="lazy" /> : <div className="text-center text-xs text-fg-subtle"><QrCode className="mx-auto mb-2 size-8" /><p>QR появится<br />после сканирования</p></div>}</div>
       </div>
     </section>
     <section className="rounded-2xl bg-surface p-5 shadow-border"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium">Фильтры подписки</div><p className="mt-1 text-xs text-fg-muted">Они влияют только на экспорт, сам пул не изменяется.</p></div><button type="button" onClick={resetFilters} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-fg-muted hover:bg-bg-subtle"><RotateCcw className="size-3.5" />Сбросить</button></div>
