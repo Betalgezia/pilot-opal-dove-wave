@@ -18,8 +18,8 @@ jobs:
         run: npm install --package-lock-only --dry-run --ignore-scripts
       - name: Clean install
         run: npm ci
-      - name: Tests
-        run: npm test
+      - name: Mihomo config tests
+        run: npm run test:mihomo
       - name: Typecheck
         run: npm run typecheck
       - name: Build
