@@ -19,7 +19,7 @@ export function pickActive(
   if (strategy === "fallback") {
     for (const source of result.sources) {
       if (!source.ok || source.alive === 0) continue;
-      const hit = rankNodes(alive.filter((n) => n.sourceId === source.id))[0];
+      const hit = rankNodes(alive.filter((n) => (n.sourceIds ?? [n.sourceId]).includes(source.id)))[0];
       if (hit) return hit;
     }
     return rankNodes(alive)[0];
@@ -36,9 +36,7 @@ export function pickExportNodes(
   filters: SubscriptionFilters = EMPTY_FILTERS,
 ): ProbedNode[] {
   if (limit <= 0) return [];
-
-  return rankNodes(filterSubscriptionNodes(result.nodes, filters))
-    .slice(0, limit);
+  return rankNodes(filterSubscriptionNodes(result.nodes.filter((n) => n.alive), filters)).slice(0, limit);
 }
 
 export function formatMs(ms: number | null | undefined): string {
