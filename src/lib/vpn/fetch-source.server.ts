@@ -1,3 +1,4 @@
+import { relayLogger } from "@/lib/relay/logger";
 import { getActiveScanSignal } from "./scan-control.server";
 
 const fetchCache = new Map<string, { at: number; text: string }>();
@@ -5,8 +6,12 @@ const FETCH_TTL = 60_000;
 
 export async function fetchSourceText(url: string): Promise<string> {
   const hit = fetchCache.get(url);
-  if (hit && Date.now() - hit.at < FETCH_TTL) return hit.text;
+  if (hit && Date.now() - hit.at < FETCH_TTL) {
+    relayLogger.info("fetch", "Source cache hit", { url, size: Buffer.byteLength(hit.text, "utf8") });
+    return hit.text;
+  }
 
+  const started = Date.now();
   const ctrl = new AbortController();
   const activeSignal = getActiveScanSignal();
   const onAbort = () => ctrl.abort();
@@ -27,7 +32,17 @@ export async function fetchSourceText(url: string): Promise<string> {
     const text = buf.toString("utf8");
     if (text.includes("\u0000")) throw new Error("Бинарный файл, нужен текстовый список URI");
     fetchCache.set(url, { at: Date.now(), text });
+    relayLogger.info("fetch", "Source fetched", {
+      url,
+      status: res.status,
+      durationMs: Date.now() - started,
+      sizeBytes: buf.byteLength,
+    });
     return text;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    relayLogger.error("fetch", "Source fetch failed", { url, durationMs: Date.now() - started, error: message });
+    throw err;
   } finally {
     clearTimeout(timer);
     activeSignal?.removeEventListener("abort", onAbort);
