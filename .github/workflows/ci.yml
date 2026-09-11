@@ -24,3 +24,16 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+
+  windows-mihomo:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Clean install
+        run: npm ci
+      - name: Mihomo Windows tests
+        run: npm run test:mihomo
