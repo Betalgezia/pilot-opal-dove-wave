@@ -41,6 +41,14 @@ export function Dashboard() {
   useEffect(() => { setSources(loadSources()); setSettings(loadSettings()); setPersist(true); getProbeCaps().then((caps) => setMihomoOk(Boolean(caps.mihomo))).catch(() => setMihomoOk(false)); }, []);
   useEffect(() => { if (!persist) return; localStorage.setItem(STORAGE_KEY, JSON.stringify(sources)); }, [sources, persist]);
   useEffect(() => { if (!persist) return; localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }, [settings, persist]);
+  useEffect(() => {
+    if (!persist) return;
+    void fetch("/api/sub", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sources, fmt: settings.exportFmt, n: settings.exportN, real: settings.realProbe && mihomoOk, testUrl: settings.testUrl || DEFAULT_TEST_URL }),
+    }).catch(() => {});
+  }, [sources, settings.exportFmt, settings.exportN, settings.realProbe, settings.testUrl, mihomoOk, persist]);
 
   async function pollProgress() { try { const res = await fetch("/api/scan/status", { cache: "no-store" }); if (res.ok) setProgress(await res.json() as ScanProgress); } catch {} }
   useEffect(() => { void pollProgress(); const id = window.setInterval(() => void pollProgress(), 800); return () => window.clearInterval(id); }, []);
