@@ -46,19 +46,41 @@ test("generated YAML uses unique proxy names on collisions", () => {
   assert.ok(names.some((name) => name.endsWith("-2")));
 });
 
-test("xhttp is emitted as native mihomo xhttp transport", () => {
+test("xhttp preserves auto/packet-up mode, packet encoding and embedded Xray options", () => {
   const xhttp = makeNode("xhttp", {
-    uri: "vless://xhttp@example.com:443?type=xhttp",
+    uri: "vless://xhttp@example.com:443?type=xhttp&security=reality&path=%2Fauth&mode=auto&packetEncoding=xudp",
     network: "xhttp",
     security: "reality",
-    path: "/",
-    hostHeader: "passport.yandex.ru",
-    extra: { mode: "packet-up" },
+    path: "/auth",
+    hostHeader: "max.ru",
+    extra: {
+      mode: "auto",
+      packetEncoding: "xudp",
+      extra: JSON.stringify({
+        xPaddingBytes: "200-1000",
+        xPaddingObfsMode: false,
+        xPaddingKey: "x_padding",
+        uplinkHTTPMethod: "POST",
+        sessionPlacement: "header",
+        sessionKey: "sid",
+        seqPlacement: "query",
+        seqKey: "seq",
+        uplinkDataPlacement: "cookie",
+        uplinkDataKey: "X-Payload",
+        uplinkChunkSize: "3072",
+        xmux: { maxConcurrency: "8-16", cMaxReuseTimes: "10-20" },
+      }),
+    },
   });
   const yaml = buildMihomoYaml([xhttp], sources);
-  assert.match(yaml, /\n    network: "xhttp"/);
-  assert.match(yaml, /\n    xhttp-opts:\n/);
-  assert.match(yaml, /\n      mode: "packet-up"/);
+  assert.match(yaml, /\n        packet-encoding: "xudp"/);
+  assert.match(yaml, /\n        network: "xhttp"/);
+  assert.match(yaml, /\n        xhttp-opts:\n/);
+  assert.match(yaml, /\n          mode: "auto"/);
+  assert.match(yaml, /\n          x-padding-bytes: "200-1000"/);
+  assert.match(yaml, /\n          uplink-http-method: "POST"/);
+  assert.match(yaml, /\n          reuse-settings:\n/);
+  assert.match(yaml, /\n            max-concurrency: "8-16"/);
 });
 
 test("generated YAML is accepted by mihomo when the local binary is available", async (t) => {
