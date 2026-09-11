@@ -13,7 +13,7 @@
  *
  * That precedence also means the file governs this workspace only. A deployed
  * build runs with the provider's project env, where the deployer sets
- * `VITE_AUTH_ENABLED` itself (today unconditionally `"true"`), so the deployed
+ * `VITE_AUTH_ENABLED` itself (today unconditionally "true"), so the deployed
  * flag is the platform's, not this file's.
  *
  * Vite picks the values up because `loadEnv` prefix-matches entries already in
@@ -111,13 +111,14 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
+  const spawnCommand = process.platform === "win32" && command === "vite" ? "vite.cmd" : command;
+  const child = spawn(spawnCommand, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));
   }
   child.on("error", (err) => {
-    console.error(`[with-app-env] failed to run ${command}:`, err?.message || err);
+    console.error(`[with-app-env] failed to run ${spawnCommand}:`, err?.message || err);
     process.exit(127);
   });
   child.on("exit", (code, signal) => {
