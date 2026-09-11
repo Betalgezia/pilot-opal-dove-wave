@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main, quality-engine-v2]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate dependency specs
+        run: npm install --package-lock-only --dry-run --ignore-scripts
+      - name: Clean install
+        run: npm ci
+      - name: Mihomo Windows tests
+        run: npm run test:mihomo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build

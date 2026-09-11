@@ -26,6 +26,8 @@ export interface ParsedNode {
   serverIp?: string;
   sourceId: string;
   sourceName: string;
+  sourceIds?: string[];
+  sourceNames?: string[];
   uuid?: string;
   password?: string;
   method?: string;
@@ -45,9 +47,16 @@ export interface ParsedNode {
   extra: Record<string, string>;
 }
 
+export type ProbeState = "checked" | "unknown";
+
 export interface ProbedNode extends ParsedNode {
   latency: number | null;
   alive: boolean;
+  probeState: ProbeState;
+  qualityScore?: number;
+  confidence?: number;
+  stability?: number;
+  targetResults?: Record<string, boolean>;
 }
 
 export interface SourceScan {
@@ -63,6 +72,25 @@ export interface SourceScan {
   bestLatency: number | null;
 }
 
+export interface ScanMetrics {
+  fetchMs: number;
+  parseMs: number;
+  sampleMs: number;
+  probeMs: number;
+  geoIpMs: number;
+  deepVerifyMs: number;
+  qualityMs: number;
+  totalMs: number;
+  sampled: number;
+  deepVerified: number;
+  targetChecks: number;
+  mihomoLoaded: number;
+  mihomoDelayReceived: number;
+  unknown: number;
+  deduplicated: number;
+  mihomoRounds: number;
+}
+
 export interface ScanResult {
   scannedAt: number;
   durationMs: number;
@@ -73,6 +101,7 @@ export interface ScanResult {
   probeMode: ProbeMode;
   testUrl: string | null;
   probeNote: string | null;
+  metrics?: ScanMetrics;
 }
 
 export type ExportFormat = "clash" | "uri" | "b64";

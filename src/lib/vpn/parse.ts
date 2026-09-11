@@ -1,42 +1,58 @@
 import { cleanRemark, countryFromRemark } from "./countries";
 import type { ParsedNode, VpnProtocol } from "./types";
 
-const PROTO_RE =
-  /^(vless|vmess|ss|trojan|hysteria2|hy2|tuic):\/\/\S+/i;
+const PROTO_RE = /^(vless|vmess|ss|trojan|hysteria2|hy2|tuic):\/\/\S+/i;
+const PROTOCOLS = new Set<VpnProtocol>([
+  "vless",
+  "vmess",
+  "ss",
+  "trojan",
+  "hysteria2",
+  "tuic",
+]);
+const NETWORKS = new Set([
+  "tcp",
+  "ws",
+  "grpc",
+  "h2",
+  "httpupgrade",
+  "splithttp",
+  "xhttp",
+  "quic",
+]);
+const ALPN_ALLOWED = new Set(["h2", "http/1.1", "http/1.0", "h3", "h3-29"]);
 
 function nodeId(parts: Array<string | number | undefined>): string {
   return parts
-    .map((p) => String(p ?? "").toLowerCase())
+    .map((part) => String(part ?? "").toLowerCase())
     .join("|")
     .replace(/[^a-z0-9.|:_-]/g, "")
     .slice(0, 180);
 }
 
-function decodeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&")
-    .replace(/"/g, '"')
+function decodeHtml(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/</g, "<")
-    .replace(/>/g, ">");
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
-function tryB64(s: string): string | null {
-  const clean = s.replace(/\s+/g, "");
+function tryB64(value: string): string | null {
+  const clean = value.replace(/\s+/g, "");
   if (!/^[A-Za-z0-9+/_=-]+$/.test(clean) || clean.length < 16) return null;
   try {
     const normalized = clean.replace(/-/g, "+").replace(/_/g, "/");
     const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-    const text =
-      typeof Buffer !== "undefined"
-        ? Buffer.from(padded, "base64").toString("utf8")
-        : decodeURIComponent(
-            Array.from(atob(padded), (c) =>
-              "%" + c.charCodeAt(0).toString(16).padStart(2, "0"),
-            ).join(""),
-          );
-    if (text.includes("://") || text.includes("{")) return text;
-    return text;
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(padded, "base64").toString("utf8");
+    }
+    return decodeURIComponent(
+      Array.from(atob(padded), (character) =>
+        `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
+      ).join(""),
+    );
   } catch {
     return null;
   }
@@ -44,16 +60,16 @@ function tryB64(s: string): string | null {
 
 function parseQuery(search: string): Record<string, string> {
   const out: Record<string, string> = {};
-  const q = search.startsWith("?") ? search.slice(1) : search;
-  for (const part of q.split("&")) {
+  const query = search.startsWith("?") ? search.slice(1) : search;
+  for (const part of query.split("&")) {
     if (!part) continue;
     const eq = part.indexOf("=");
-    const k = eq === -1 ? part : part.slice(0, eq);
-    const v = eq === -1 ? "" : part.slice(eq + 1);
+    const rawKey = eq === -1 ? part : part.slice(0, eq);
+    const rawValue = eq === -1 ? "" : part.slice(eq + 1);
     try {
-      out[decodeURIComponent(k)] = decodeURIComponent(v);
+      out[decodeURIComponent(rawKey).trim()] = decodeURIComponent(rawValue).trim();
     } catch {
-      out[k] = v;
+      out[rawKey.trim()] = rawValue.trim();
     }
   }
   return out;
@@ -62,191 +78,184 @@ function parseQuery(search: string): Record<string, string> {
 function splitHash(line: string): { body: string; remark: string } {
   const hash = line.indexOf("#");
   if (hash === -1) return { body: line, remark: "" };
-  return { body: line.slice(0, hash), remark: line.slice(hash + 1) };
+  return { body: line.slice(0, hash), remark: line.slice(hash + 1).trim() };
 }
 
 function parseHostPort(authority: string): { host: string; port: number } | null {
   const v6 = authority.match(/^\[([^\]]+)\]:(\d+)$/);
-  if (v6) return { host: v6[1], port: Number(v6[2]) };
+  if (v6) return { host: v6[1].trim(), port: Number(v6[2]) };
   const last = authority.lastIndexOf(":");
   if (last === -1) return null;
-  const host = authority.slice(0, last);
-  const port = Number(authority.slice(last + 1));
+  const host = authority.slice(0, last).trim();
+  const port = Number(authority.slice(last + 1).trim());
   if (!host || !Number.isFinite(port) || port <= 0 || port > 65535) return null;
   return { host, port };
 }
 
 function mapNetwork(type: string | undefined): string {
-  const t = (type || "tcp").toLowerCase();
-  if (t === "xhttp" || t === "splithttp") return "splithttp";
-  if (t === "raw") return "tcp";
-  if (t === "h2") return "h2";
-  if (t === "httpupgrade") return "httpupgrade";
-  return t;
+  const normalized = (type || "tcp").trim().toLowerCase();
+  if (normalized === "raw") return "tcp";
+  if (normalized === "h2") return "h2";
+  if (normalized === "httpupgrade") return "httpupgrade";
+  if (normalized === "splithttp") return "splithttp";
+  if (normalized === "xhttp") return "xhttp";
+  return normalized;
 }
 
-function parseVless(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+function boolParam(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function parseVless(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const { body, remark } = splitHash(line);
   const rest = body.slice("vless://".length);
-  const qIdx = rest.indexOf("?");
-  const main = qIdx === -1 ? rest : rest.slice(0, qIdx);
-  const query = qIdx === -1 ? "" : rest.slice(qIdx + 1);
+  const queryIndex = rest.indexOf("?");
+  const main = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const params = parseQuery(queryIndex === -1 ? "" : rest.slice(queryIndex + 1));
   const at = main.lastIndexOf("@");
   if (at === -1) return null;
-  const uuid = main.slice(0, at);
-  const hp = parseHostPort(main.slice(at + 1));
-  if (!uuid || !hp) return null;
-  const p = parseQuery(query);
-  const name = cleanRemark(remark || `${hp.host}:${hp.port}`);
-  const network = mapNetwork(p.type || p.network);
+  const uuid = decodeURIComponent(main.slice(0, at)).trim();
+  const hostPort = parseHostPort(main.slice(at + 1));
+  if (!hostPort) return null;
+  const network = mapNetwork(params.type || params.network);
+  const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId(["vless", hp.host, hp.port, uuid, network, p.path, p.security]),
-    uri: line,
+    id: nodeId([
+      "vless",
+      hostPort.host,
+      hostPort.port,
+      uuid,
+      network,
+      params.path,
+      params.security,
+    ]),
+    uri: line.trim(),
     protocol: "vless",
     name,
-    host: hp.host,
-    port: hp.port,
-    country: countryFromRemark(remark + " " + name),
+    host: hostPort.host,
+    port: hostPort.port,
+    country: countryFromRemark(`${remark} ${name}`),
     sourceId,
     sourceName,
     uuid,
-    security: p.security,
+    security: params.security,
     network,
-    flow: p.flow,
-    sni: p.sni || p.servername,
-    fp: p.fp,
-    alpn: p.alpn,
-    pbk: p.pbk,
-    sid: p.sid,
-    path: p.path,
-    hostHeader: p.host,
-    serviceName: p.serviceName || p.servicename,
-    extra: p,
+    flow: params.flow,
+    sni: params.sni || params.servername,
+    fp: params.fp,
+    alpn: params.alpn,
+    pbk: params.pbk,
+    sid: params.sid,
+    path: params.path,
+    hostHeader: params.host,
+    serviceName: params.serviceName || params.servicename,
+    insecure: boolParam(params.insecure) || boolParam(params.allowInsecure),
+    extra: params,
   };
 }
 
-function parseTrojan(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+function parseTrojan(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const { body, remark } = splitHash(line);
   const rest = body.slice("trojan://".length);
-  const qIdx = rest.indexOf("?");
-  const main = qIdx === -1 ? rest : rest.slice(0, qIdx);
-  const query = qIdx === -1 ? "" : rest.slice(qIdx + 1);
+  const queryIndex = rest.indexOf("?");
+  const main = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const params = parseQuery(queryIndex === -1 ? "" : rest.slice(queryIndex + 1));
   const at = main.lastIndexOf("@");
   if (at === -1) return null;
-  const password = decodeURIComponent(main.slice(0, at));
-  const hp = parseHostPort(main.slice(at + 1));
-  if (!password || !hp) return null;
-  const p = parseQuery(query);
-  const name = cleanRemark(remark || `${hp.host}:${hp.port}`);
-  const network = mapNetwork(p.type || p.network || "tcp");
+  const password = decodeURIComponent(main.slice(0, at)).trim();
+  const hostPort = parseHostPort(main.slice(at + 1));
+  if (!password || !hostPort) return null;
+  const network = mapNetwork(params.type || params.network || "tcp");
+  const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId(["trojan", hp.host, hp.port, password, network]),
-    uri: line,
+    id: nodeId(["trojan", hostPort.host, hostPort.port, password, network]),
+    uri: line.trim(),
     protocol: "trojan",
     name,
-    host: hp.host,
-    port: hp.port,
-    country: countryFromRemark(remark + " " + name),
+    host: hostPort.host,
+    port: hostPort.port,
+    country: countryFromRemark(`${remark} ${name}`),
     sourceId,
     sourceName,
     password,
-    security: p.security || "tls",
+    security: params.security || "tls",
     network,
-    sni: p.sni || p.peer,
-    fp: p.fp,
-    alpn: p.alpn,
-    pbk: p.pbk,
-    sid: p.sid,
-    path: p.path,
-    hostHeader: p.host,
-    extra: p,
+    sni: params.sni || params.peer,
+    fp: params.fp,
+    alpn: params.alpn,
+    pbk: params.pbk,
+    sid: params.sid,
+    path: params.path,
+    hostHeader: params.host,
+    insecure: boolParam(params.insecure) || boolParam(params.allowInsecure),
+    extra: params,
   };
 }
 
-function parseHysteria2(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+function parseHysteria2(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const { body, remark } = splitHash(line);
   const scheme = body.startsWith("hy2://") ? "hy2://" : "hysteria2://";
   const rest = body.slice(scheme.length);
-  const qIdx = rest.indexOf("?");
-  const main = qIdx === -1 ? rest : rest.slice(0, qIdx);
-  const query = qIdx === -1 ? "" : rest.slice(qIdx + 1);
+  const queryIndex = rest.indexOf("?");
+  const main = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const params = parseQuery(queryIndex === -1 ? "" : rest.slice(queryIndex + 1));
   const at = main.lastIndexOf("@");
   if (at === -1) return null;
-  const password = decodeURIComponent(main.slice(0, at));
-  const hp = parseHostPort(main.slice(at + 1));
-  if (!hp) return null;
-  const p = parseQuery(query);
-  const name = cleanRemark(remark || `${hp.host}:${hp.port}`);
+  const password = decodeURIComponent(main.slice(0, at)).trim();
+  const hostPort = parseHostPort(main.slice(at + 1));
+  if (!hostPort || !password) return null;
+  const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId(["hysteria2", hp.host, hp.port, password]),
-    uri: line.replace(/^hy2:\/\//, "hysteria2://"),
+    id: nodeId(["hysteria2", hostPort.host, hostPort.port, password]),
+    uri: line.trim().replace(/^hy2:\/\//, "hysteria2://"),
     protocol: "hysteria2",
     name,
-    host: hp.host,
-    port: hp.port,
-    country: countryFromRemark(remark + " " + name),
+    host: hostPort.host,
+    port: hostPort.port,
+    country: countryFromRemark(`${remark} ${name}`),
     sourceId,
     sourceName,
     password,
-    sni: p.sni || p.peer,
-    insecure: p.insecure === "1" || p.insecure === "true",
-    extra: p,
+    sni: params.sni || params.peer,
+    insecure: boolParam(params.insecure),
+    extra: params,
   };
 }
 
-function parseTuic(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+function parseTuic(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const { body, remark } = splitHash(line);
   const rest = body.slice("tuic://".length);
-  const qIdx = rest.indexOf("?");
-  const main = qIdx === -1 ? rest : rest.slice(0, qIdx);
-  const query = qIdx === -1 ? "" : rest.slice(qIdx + 1);
+  const queryIndex = rest.indexOf("?");
+  const main = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const params = parseQuery(queryIndex === -1 ? "" : rest.slice(queryIndex + 1));
   const at = main.lastIndexOf("@");
   if (at === -1) return null;
-  const userinfo = main.slice(0, at);
-  const hp = parseHostPort(main.slice(at + 1));
-  if (!hp) return null;
-  const [uuid, password] = userinfo.split(":");
-  const p = parseQuery(query);
-  const name = cleanRemark(remark || `${hp.host}:${hp.port}`);
+  const userInfo = main.slice(0, at);
+  const hostPort = parseHostPort(main.slice(at + 1));
+  if (!hostPort) return null;
+  const [uuid, password] = userInfo.split(":").map((value) => value.trim());
+  if (!uuid || !password) return null;
+  const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId(["tuic", hp.host, hp.port, uuid, password]),
-    uri: line,
+    id: nodeId(["tuic", hostPort.host, hostPort.port, uuid, password]),
+    uri: line.trim(),
     protocol: "tuic",
     name,
-    host: hp.host,
-    port: hp.port,
-    country: countryFromRemark(remark + " " + name),
+    host: hostPort.host,
+    port: hostPort.port,
+    country: countryFromRemark(`${remark} ${name}`),
     sourceId,
     sourceName,
     uuid,
     password,
-    sni: p.sni,
-    alpn: p.alpn,
-    extra: p,
+    sni: params.sni,
+    alpn: params.alpn,
+    insecure: boolParam(params.insecure),
+    extra: params,
   };
 }
 
-function parseSs(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+function parseSs(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const { body, remark } = splitHash(line);
   let rest = body.slice("ss://".length);
   let method = "";
@@ -255,18 +264,18 @@ function parseSs(
 
   if (rest.includes("@")) {
     const at = rest.lastIndexOf("@");
-    const userinfo = rest.slice(0, at);
+    const userInfo = rest.slice(0, at);
     authority = rest.slice(at + 1);
-    if (userinfo.includes(":")) {
-      const colon = userinfo.indexOf(":");
-      method = decodeURIComponent(userinfo.slice(0, colon));
-      password = decodeURIComponent(userinfo.slice(colon + 1));
+    if (userInfo.includes(":")) {
+      const colon = userInfo.indexOf(":");
+      method = decodeURIComponent(userInfo.slice(0, colon)).trim();
+      password = decodeURIComponent(userInfo.slice(colon + 1)).trim();
     } else {
-      const decoded = tryB64(userinfo);
-      if (decoded && decoded.includes(":")) {
+      const decoded = tryB64(userInfo);
+      if (decoded?.includes(":")) {
         const colon = decoded.indexOf(":");
-        method = decoded.slice(0, colon);
-        password = decoded.slice(colon + 1);
+        method = decoded.slice(0, colon).trim();
+        password = decoded.slice(colon + 1).trim();
       }
     }
   } else {
@@ -274,26 +283,27 @@ function parseSs(
     if (!decoded) return null;
     const at = decoded.lastIndexOf("@");
     if (at === -1) return null;
-    const userinfo = decoded.slice(0, at);
+    const userInfo = decoded.slice(0, at);
     authority = decoded.slice(at + 1);
-    const colon = userinfo.indexOf(":");
-    method = userinfo.slice(0, colon);
-    password = userinfo.slice(colon + 1);
+    const colon = userInfo.indexOf(":");
+    if (colon === -1) return null;
+    method = userInfo.slice(0, colon).trim();
+    password = userInfo.slice(colon + 1).trim();
   }
 
-  const qIdx = authority.indexOf("?");
-  if (qIdx !== -1) authority = authority.slice(0, qIdx);
-  const hp = parseHostPort(authority);
-  if (!hp || !method || !password) return null;
-  const name = cleanRemark(remark || `${hp.host}:${hp.port}`);
+  const queryIndex = authority.indexOf("?");
+  if (queryIndex !== -1) authority = authority.slice(0, queryIndex);
+  const hostPort = parseHostPort(authority);
+  if (!hostPort || !method || !password) return null;
+  const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId(["ss", hp.host, hp.port, method, password]),
-    uri: line,
+    id: nodeId(["ss", hostPort.host, hostPort.port, method, password]),
+    uri: line.trim(),
     protocol: "ss",
     name,
-    host: hp.host,
-    port: hp.port,
-    country: countryFromRemark(remark + " " + name),
+    host: hostPort.host,
+    port: hostPort.port,
+    country: countryFromRemark(`${remark} ${name}`),
     sourceId,
     sourceName,
     method,
@@ -302,27 +312,30 @@ function parseSs(
   };
 }
 
-function parseVmess(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
-  const raw = line.slice("vmess://".length);
-  const decoded = tryB64(raw);
+function parseVmess(line: string, sourceId: string, sourceName: string): ParsedNode | null {
+  const decoded = tryB64(line.slice("vmess://".length));
   if (!decoded) return null;
   try {
-    const j = JSON.parse(decoded) as Record<string, unknown>;
-    const host = String(j.add || j.host || "");
-    const port = Number(j.port);
-    const uuid = String(j.id || "");
+    const json = JSON.parse(decoded) as Record<string, unknown>;
+    const host = String(json.add || json.host || "").trim();
+    const port = Number(json.port);
+    const uuid = String(json.id || "").trim();
     if (!host || !port || !uuid) return null;
-    const remark = String(j.ps || j.remark || `${host}:${port}`);
+
+    const remark = String(json.ps || json.remark || `${host}:${port}`).trim();
     const name = cleanRemark(remark);
-    const network = mapNetwork(String(j.net || "tcp"));
-    const tls = String(j.tls || "");
+    const network = mapNetwork(String(json.net || "tcp"));
+    const tls = String(json.tls || "").trim();
+    const path = String(json.path || "").trim();
+    const hostHeader = String(json.host || "").trim();
+    const insecure =
+      json.allowInsecure === true ||
+      String(json.allowInsecure || "").trim().toLowerCase() === "true" ||
+      String(json.insecure || "").trim() === "1";
+
     return {
-      id: nodeId(["vmess", host, port, uuid, network, String(j.path || "")]),
-      uri: line,
+      id: nodeId(["vmess", host, port, uuid, network, path]),
+      uri: line.trim(),
       protocol: "vmess",
       name,
       host,
@@ -331,21 +344,101 @@ function parseVmess(
       sourceId,
       sourceName,
       uuid,
-      aid: String(j.aid ?? "0"),
+      aid: String(json.aid ?? "0").trim(),
       security: tls ? "tls" : "none",
       network,
-      sni: String(j.sni || j.host || ""),
-      path: String(j.path || ""),
-      hostHeader: String(j.host || ""),
+      sni: String(json.sni || json.host || "").trim(),
+      path,
+      hostHeader,
+      insecure,
       extra: {
-        scy: String(j.scy || j.security || "auto"),
+        scy: String(json.scy || json.security || "auto").trim(),
         tls,
-        type: String(j.type || ""),
+        type: String(json.type || "").trim(),
+        packetEncoding: String(json.packetEncoding || "").trim(),
       },
     };
   } catch {
     return null;
   }
+}
+
+function sanitizeNode(node: ParsedNode): ParsedNode | null {
+  const copy = { ...node } as ParsedNode;
+  for (const key of [
+    "uri",
+    "name",
+    "host",
+    "sourceId",
+    "sourceName",
+    "uuid",
+    "password",
+    "method",
+    "security",
+    "network",
+    "flow",
+    "sni",
+    "fp",
+    "pbk",
+    "sid",
+    "path",
+    "hostHeader",
+    "serviceName",
+    "aid",
+  ] as const) {
+    const value = copy[key];
+    if (typeof value === "string") copy[key] = value.trim() as never;
+  }
+
+  copy.protocol = copy.protocol.trim().toLowerCase() as VpnProtocol;
+  if (
+    !PROTOCOLS.has(copy.protocol) ||
+    !copy.host ||
+    !Number.isInteger(copy.port) ||
+    copy.port < 1 ||
+    copy.port > 65535
+  ) {
+    return null;
+  }
+
+  copy.network = mapNetwork(copy.network);
+  if (!NETWORKS.has(copy.network)) return null;
+
+  const alpn = (copy.alpn ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(
+      (value) =>
+        value.length > 0 && value.length <= 32 && ALPN_ALLOWED.has(value),
+    );
+  copy.alpn = alpn.length ? alpn.join(",") : undefined;
+
+  copy.extra = Object.fromEntries(
+    Object.entries(copy.extra ?? {}).map(([key, value]) => [
+      key.trim(),
+      String(value).trim(),
+    ]),
+  );
+
+  if (copy.network === "ws" && !copy.path?.trim()) return null;
+  if (copy.network === "grpc" && !copy.serviceName?.trim()) return null;
+  if (copy.network === "xhttp" && !copy.path?.trim()) return null;
+  if (["vless", "vmess", "tuic"].includes(copy.protocol) && !copy.uuid) return null;
+  if (copy.protocol === "ss" && (!copy.password || !copy.method)) return null;
+  if (["trojan", "hysteria2"].includes(copy.protocol) && !copy.password) return null;
+
+  copy.id = nodeId([
+    copy.protocol,
+    copy.host,
+    copy.port,
+    copy.uuid,
+    copy.password,
+    copy.method,
+    copy.network,
+    copy.path,
+    copy.security,
+  ]);
+  return copy;
 }
 
 export function parseUriLine(
@@ -355,19 +448,29 @@ export function parseUriLine(
 ): ParsedNode | null {
   const trimmed = decodeHtml(line.trim());
   if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) return null;
+
   const lower = trimmed.toLowerCase();
   try {
-    if (lower.startsWith("vless://")) return parseVless(trimmed, sourceId, sourceName);
-    if (lower.startsWith("vmess://")) return parseVmess(trimmed, sourceId, sourceName);
-    if (lower.startsWith("ss://")) return parseSs(trimmed, sourceId, sourceName);
-    if (lower.startsWith("trojan://")) return parseTrojan(trimmed, sourceId, sourceName);
-    if (lower.startsWith("hysteria2://") || lower.startsWith("hy2://"))
-      return parseHysteria2(trimmed, sourceId, sourceName);
-    if (lower.startsWith("tuic://")) return parseTuic(trimmed, sourceId, sourceName);
+    let parsed: ParsedNode | null = null;
+
+    if (lower.startsWith("vless://")) {
+      parsed = parseVless(trimmed, sourceId, sourceName);
+    } else if (lower.startsWith("vmess://")) {
+      parsed = parseVmess(trimmed, sourceId, sourceName);
+    } else if (lower.startsWith("ss://")) {
+      parsed = parseSs(trimmed, sourceId, sourceName);
+    } else if (lower.startsWith("trojan://")) {
+      parsed = parseTrojan(trimmed, sourceId, sourceName);
+    } else if (lower.startsWith("hysteria2://") || lower.startsWith("hy2://")) {
+      parsed = parseHysteria2(trimmed, sourceId, sourceName);
+    } else if (lower.startsWith("tuic://")) {
+      parsed = parseTuic(trimmed, sourceId, sourceName);
+    }
+
+    return parsed === null ? null : sanitizeNode(parsed);
   } catch {
     return null;
   }
-  return null;
 }
 
 export function parseSubscription(
@@ -385,8 +488,7 @@ export function parseSubscription(
   const seen = new Set<string>();
   for (const line of text.split(/\r?\n/)) {
     const node = parseUriLine(line, sourceId, sourceName);
-    if (!node) continue;
-    if (seen.has(node.id)) continue;
+    if (!node || seen.has(node.id)) continue;
     seen.add(node.id);
     nodes.push(node);
   }
@@ -398,20 +500,14 @@ export function endpointKey(node: { host: string; port: number }): string {
 }
 
 export function protocolRank(p: VpnProtocol): number {
-  switch (p) {
-    case "vless":
-      return 0;
-    case "hysteria2":
-      return 1;
-    case "trojan":
-      return 2;
-    case "ss":
-      return 3;
-    case "vmess":
-      return 4;
-    case "tuic":
-      return 5;
-    default:
-      return 9;
-  }
+  return (
+    {
+      vless: 1,
+      vmess: 2,
+      trojan: 3,
+      ss: 4,
+      hysteria2: 5,
+      tuic: 6,
+    } as Record<VpnProtocol, number>
+  )[p] ?? 99;
 }
