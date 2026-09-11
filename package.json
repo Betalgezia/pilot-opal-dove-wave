@@ -14,7 +14,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test:mihomo": "node --experimental-strip-types --test src/lib/vpn/mihomo.test.ts",
+    "test:mihomo": "node --experimental-strip-types --experimental-specifier-resolution=node --test src/lib/vpn/mihomo.test.ts",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/vpn/quality.test.ts src/lib/vpn/parse.test.ts src/lib/vpn/mihomo.test.ts src/lib/vpn/node-identity.test.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -64,7 +64,8 @@
     "tailwindcss": "^4.3.0",
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
-    "zod": "^4.4.0"
+    "zod": "^4.4.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
@@ -75,7 +76,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "eslint": "^9.20.0",
     "eslint-config-prettier": "^10.1.1",
-    "eslint-plugin-prettier": "^5.2.0",
+    "eslint-plugin-prettier": "^5.2.6",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
