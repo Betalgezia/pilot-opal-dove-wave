@@ -1,7 +1,22 @@
 import type { ParsedNode, ProbedNode, SourceScan } from "./types";
 
+const ALPN_ALLOWED = new Set(["h2", "http/1.1", "h3"]);
+const XHTTP_MODES = new Set(["stream-one", "stream-up", "packet-up"]);
+
 function q(value: string): string {
-  return JSON.stringify(value);
+  return JSON.stringify(value.trim());
+}
+
+function cleanText(value: string | undefined, fallback = ""): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function alpnValues(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => ALPN_ALLOWED.has(item));
 }
 
 function indent(obj: Record<string, unknown>, level = 2): string[] {
@@ -39,10 +54,10 @@ function indent(obj: Record<string, unknown>, level = 2): string[] {
 }
 
 function uniqueName(base: string, used: Set<string>): string {
-  let name = base.slice(0, 40) || "node";
+  let name = cleanText(base).slice(0, 40) || "node";
   let n = 2;
   while (used.has(name)) {
-    name = `${base.slice(0, 36)}-${n}`;
+    name = `${cleanText(base).slice(0, 36)}-${n}`;
     n += 1;
   }
   used.add(name);
@@ -103,8 +118,8 @@ function addXhttpExtra(out: Record<string, unknown>, extra: Record<string, unkno
   }
   const paddingObfs = boolValue(extra.xPaddingObfsMode);
   if (paddingObfs !== undefined) out["x-padding-obfs-mode"] = paddingObfs;
-  const mode = textValue(extra.mode);
-  if (mode && ["auto", "stream-one", "stream-up", "packet-up"].includes(mode)) out.mode = mode;
+  const mode = textValue(extra.mode)?.toLowerCase();
+  if (mode && XHTTP_MODES.has(mode)) out.mode = mode;
   const nestedXmux = extra.xmux;
   if (nestedXmux && typeof nestedXmux === "object" && !Array.isArray(nestedXmux)) {
     const xmux = nestedXmux as Record<string, unknown>;
@@ -127,34 +142,33 @@ function addXhttpExtra(out: Record<string, unknown>, extra: Record<string, unkno
 }
 
 export function clashProxyObject(node: ParsedNode, name: string): Record<string, unknown> {
-  switch (node.protocol) {
+  const protocol = cleanText(node.protocol).toLowerCase();
+  switch (protocol) {
     case "vless": {
       const obj: Record<string, unknown> = {
-        name,
+        name: cleanText(name),
         type: "vless",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        uuid: node.uuid,
+        uuid: cleanText(node.uuid),
         udp: true,
-        network: node.network || "tcp",
+        network: cleanText(node.network, "tcp").toLowerCase(),
       };
-      if (node.flow) obj.flow = node.flow.replace(/-udp443$/, "");
-      const packetEncoding = node.extra.packetEncoding;
+      if (node.flow) obj.flow = cleanText(node.flow).replace(/-udp443$/, "");
+      const packetEncoding = cleanText(node.extra.packetEncoding).toLowerCase();
       if (packetEncoding === "xudp" || packetEncoding === "packetaddr") obj["packet-encoding"] = packetEncoding;
-      const tls =
-        node.security === "tls" ||
-        node.security === "reality" ||
-        Boolean(node.sni) ||
-        Boolean(node.pbk);
+      const security = cleanText(node.security).toLowerCase();
+      const tls = security === "tls" || security === "reality" || Boolean(cleanText(node.sni)) || Boolean(node.pbk);
       if (tls) obj.tls = true;
-      if (node.sni) obj.servername = node.sni;
-      if (node.fp) obj["client-fingerprint"] = node.fp;
-      if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (node.sni) obj.servername = cleanText(node.sni);
+      if (node.fp) obj["client-fingerprint"] = cleanText(node.fp);
+      const alpn = alpnValues(node.alpn);
+      if (alpn.length) obj.alpn = alpn;
       if (node.insecure) obj["skip-cert-verify"] = true;
-      if (node.security === "reality" && node.pbk) {
+      if (security === "reality" && node.pbk) {
         obj["reality-opts"] = {
-          "public-key": node.pbk,
-          "short-id": node.sid || "",
+          "public-key": cleanText(node.pbk),
+          "short-id": cleanText(node.sid),
         };
       }
       applyNetworkOpts(obj, node);
@@ -162,23 +176,25 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
     }
     case "trojan": {
       const obj: Record<string, unknown> = {
-        name,
+        name: cleanText(name),
         type: "trojan",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        password: node.password,
+        password: cleanText(node.password),
         udp: true,
-        network: node.network || "tcp",
+        network: cleanText(node.network, "tcp").toLowerCase(),
         tls: true,
       };
-      if (node.sni) obj.sni = node.sni;
-      if (node.fp) obj["client-fingerprint"] = node.fp;
-      if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (node.sni) obj.sni = cleanText(node.sni);
+      if (node.fp) obj["client-fingerprint"] = cleanText(node.fp);
+      const alpn = alpnValues(node.alpn);
+      if (alpn.length) obj.alpn = alpn;
       if (node.insecure) obj["skip-cert-verify"] = true;
-      if (node.security === "reality" && node.pbk) {
+      const security = cleanText(node.security).toLowerCase();
+      if (security === "reality" && node.pbk) {
         obj["reality-opts"] = {
-          "public-key": node.pbk,
-          "short-id": node.sid || "",
+          "public-key": cleanText(node.pbk),
+          "short-id": cleanText(node.sid),
         };
       }
       applyNetworkOpts(obj, node);
@@ -186,97 +202,102 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
     }
     case "ss":
       return {
-        name,
+        name: cleanText(name),
         type: "ss",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        cipher: node.method,
-        password: node.password,
+        cipher: cleanText(node.method),
+        password: cleanText(node.password),
         udp: true,
       };
     case "vmess": {
       const obj: Record<string, unknown> = {
-        name,
+        name: cleanText(name),
         type: "vmess",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        uuid: node.uuid,
+        uuid: cleanText(node.uuid),
         alterId: Number(node.aid || 0),
-        cipher: node.extra.scy || "auto",
+        cipher: cleanText(node.extra.scy, "auto"),
         udp: true,
-        network: node.network || "tcp",
+        network: cleanText(node.network, "tcp").toLowerCase(),
       };
-      const packetEncoding = node.extra.packetEncoding;
+      const packetEncoding = cleanText(node.extra.packetEncoding).toLowerCase();
       if (packetEncoding === "xudp" || packetEncoding === "packetaddr") obj["packet-encoding"] = packetEncoding;
-      if (node.security === "tls" || node.extra.tls === "tls") obj.tls = true;
-      if (node.sni) obj.servername = node.sni;
-      if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (cleanText(node.security).toLowerCase() === "tls" || cleanText(node.extra.tls).toLowerCase() === "tls") obj.tls = true;
+      if (node.sni) obj.servername = cleanText(node.sni);
+      const alpn = alpnValues(node.alpn);
+      if (alpn.length) obj.alpn = alpn;
       if (node.insecure) obj["skip-cert-verify"] = true;
       applyNetworkOpts(obj, node);
       return obj;
     }
     case "hysteria2":
       return {
-        name,
+        name: cleanText(name),
         type: "hysteria2",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        password: node.password,
-        sni: node.sni,
+        password: cleanText(node.password),
+        sni: cleanText(node.sni),
         "skip-cert-verify": Boolean(node.insecure),
       };
-    case "tuic":
-      return {
-        name,
+    case "tuic": {
+      const obj: Record<string, unknown> = {
+        name: cleanText(name),
         type: "tuic",
-        server: node.host,
+        server: cleanText(node.host),
         port: node.port,
-        uuid: node.uuid,
-        password: node.password,
-        sni: node.sni,
-        alpn: node.alpn ? node.alpn.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+        uuid: cleanText(node.uuid),
+        password: cleanText(node.password),
+        sni: cleanText(node.sni),
         udp: true,
       };
+      const alpn = alpnValues(node.alpn);
+      if (alpn.length) obj.alpn = alpn;
+      return obj;
+    }
     default:
-      return { name, type: node.protocol, server: node.host, port: node.port };
+      return { name: cleanText(name), type: protocol || "unknown", server: cleanText(node.host), port: node.port };
   }
 }
 
 function applyNetworkOpts(obj: Record<string, unknown>, node: ParsedNode) {
-  const net = node.network || "tcp";
+  const net = cleanText(node.network, "tcp").toLowerCase();
   if (net === "ws") {
     obj["ws-opts"] = {
-      path: node.path || "/",
-      ...(node.hostHeader ? { headers: { Host: node.hostHeader } } : {}),
+      path: cleanText(node.path, "/"),
+      ...(cleanText(node.hostHeader) ? { headers: { Host: cleanText(node.hostHeader) } } : {}),
     };
   } else if (net === "grpc") {
     obj["grpc-opts"] = {
-      "grpc-service-name": node.serviceName || "",
+      "grpc-service-name": cleanText(node.serviceName),
     };
   } else if (net === "httpupgrade") {
     obj["smux"] = { enabled: false };
     obj["ws-opts"] = undefined;
     obj["http-opts"] = {
-      path: [node.path || "/"],
-      ...(node.hostHeader ? { headers: { Host: [node.hostHeader] } } : {}),
+      path: [cleanText(node.path, "/")],
+      ...(cleanText(node.hostHeader) ? { headers: { Host: [cleanText(node.hostHeader)] } } : {}),
     };
     obj.network = "httpupgrade";
   } else if (net === "splithttp") {
     obj.network = "splithttp";
     obj["splithttp-opts"] = {
-      path: node.path || "/",
-      host: node.hostHeader || "",
+      path: cleanText(node.path, "/"),
+      host: cleanText(node.hostHeader),
     };
   } else if (net === "xhttp") {
     obj.network = "xhttp";
     const xhttp: Record<string, unknown> = {
-      path: node.path || "/",
-      ...(node.hostHeader ? { host: node.hostHeader } : {}),
+      path: cleanText(node.path, "/"),
+      ...(cleanText(node.hostHeader) ? { host: cleanText(node.hostHeader) } : {}),
     };
-    const mode = node.extra.mode;
-    if (["auto", "stream-one", "stream-up", "packet-up"].includes(mode)) xhttp.mode = mode;
+    const mode = cleanText(node.extra.mode).toLowerCase();
+    if (XHTTP_MODES.has(mode)) xhttp.mode = mode;
     addXhttpExtra(xhttp, embeddedExtra(node));
-    if (node.extra.xPaddingBytes && !xhttp["x-padding-bytes"]) xhttp["x-padding-bytes"] = node.extra.xPaddingBytes;
+    const paddingBytes = cleanText(node.extra.xPaddingBytes);
+    if (paddingBytes && !xhttp["x-padding-bytes"]) xhttp["x-padding-bytes"] = paddingBytes;
     obj["xhttp-opts"] = xhttp;
   }
 }
@@ -288,15 +309,17 @@ export function buildMihomoYaml(
   const used = new Set<string>();
   const named: Array<{ node: ParsedNode; name: string }> = [];
   for (const node of nodes) {
-    const cc = node.country || "XX";
-    const base = `${cc} ${node.protocol} ${node.host.split(".")[0]}`;
+    const cc = cleanText(node.country, "XX").toUpperCase();
+    const host = cleanText(node.host);
+    const protocol = cleanText(node.protocol).toLowerCase();
+    const base = `${cc} ${protocol} ${host.split(".")[0]}`;
     named.push({ node, name: uniqueName(base, used) });
   }
 
   const bySource = new Map<string, string[]>();
   for (const { node, name } of named) {
     const sourceIds = node.sourceIds?.length ? node.sourceIds : [node.sourceId];
-    for (const sourceId of new Set(sourceIds)) {
+    for (const sourceId of new Set(sourceIds.map(cleanText).filter(Boolean))) {
       const list = bySource.get(sourceId) ?? [];
       list.push(name);
       bySource.set(sourceId, list);
