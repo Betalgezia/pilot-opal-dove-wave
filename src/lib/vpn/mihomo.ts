@@ -7,7 +7,7 @@ function q(value: string): string {
   return JSON.stringify(value.trim());
 }
 
-function cleanText(value: string | undefined, fallback = ""): string {
+function cleanText(value: string | null | undefined, fallback = ""): string {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
@@ -319,7 +319,7 @@ export function buildMihomoYaml(
   const bySource = new Map<string, string[]>();
   for (const { node, name } of named) {
     const sourceIds = node.sourceIds?.length ? node.sourceIds : [node.sourceId];
-    for (const sourceId of new Set(sourceIds.map(cleanText).filter(Boolean))) {
+    for (const sourceId of sourceIds.map((id) => cleanText(id)).filter((id) => id.length > 0)) {
       const list = bySource.get(sourceId) ?? [];
       list.push(name);
       bySource.set(sourceId, list);
