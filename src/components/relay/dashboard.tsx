@@ -94,7 +94,7 @@ export function Dashboard() {
       if (enabled.length === 0) throw new Error("Включите хотя бы один источник");
       return scanSources({ data: {
         sources: enabled,
-        perSource: 3000,
+        perSource: 5000,
         globalCap: 20000,
         timeoutMs: settings.realProbe ? 6000 : 2200,
         real: settings.realProbe,
