@@ -61,9 +61,7 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
         udp: true,
         network: node.network || "tcp",
       };
-      if (node.flow) {
-        obj.flow = node.flow.replace(/-udp443$/, "");
-      }
+      if (node.flow) obj.flow = node.flow.replace(/-udp443$/, "");
       const tls =
         node.security === "tls" ||
         node.security === "reality" ||
@@ -91,9 +89,12 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
         password: node.password,
         udp: true,
         network: node.network || "tcp",
+        tls: true,
       };
       if (node.sni) obj.sni = node.sni;
       if (node.fp) obj["client-fingerprint"] = node.fp;
+      if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (node.insecure) obj["skip-cert-verify"] = true;
       if (node.security === "reality" && node.pbk) {
         obj["reality-opts"] = {
           "public-key": node.pbk,
@@ -127,6 +128,7 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
       };
       if (node.security === "tls" || node.extra.tls === "tls") obj.tls = true;
       if (node.sni) obj.servername = node.sni;
+      if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
       applyNetworkOpts(obj, node);
       return obj;
     }
@@ -149,7 +151,7 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
         uuid: node.uuid,
         password: node.password,
         sni: node.sni,
-        alpn: node.alpn ? node.alpn.split(",") : undefined,
+        alpn: node.alpn ? node.alpn.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
         udp: true,
       };
     default:
@@ -178,11 +180,20 @@ function applyNetworkOpts(obj: Record<string, unknown>, node: ParsedNode) {
       ...(node.hostHeader ? { headers: { Host: [node.hostHeader] } } : {}),
     };
     obj.network = "httpupgrade";
-  } else if (net === "splithttp" || net === "xhttp") {
+  } else if (net === "splithttp") {
     obj.network = "splithttp";
     obj["splithttp-opts"] = {
       path: node.path || "/",
       host: node.hostHeader || "",
+    };
+  } else if (net === "xhttp") {
+    obj.network = "xhttp";
+    const mode = node.extra.mode;
+    const validMode = mode === "stream-one" || mode === "stream-up" || mode === "packet-up" ? mode : undefined;
+    obj["xhttp-opts"] = {
+      path: node.path || "/",
+      ...(node.hostHeader ? { host: node.hostHeader } : {}),
+      ...(validMode ? { mode: validMode } : {}),
     };
   }
 }
@@ -201,19 +212,23 @@ export function buildMihomoYaml(
 
   const bySource = new Map<string, string[]>();
   for (const { node, name } of named) {
-    const list = bySource.get(node.sourceId) ?? [];
-    list.push(name);
-    bySource.set(node.sourceId, list);
+    const sourceIds = node.sourceIds?.length ? node.sourceIds : [node.sourceId];
+    for (const sourceId of new Set(sourceIds)) {
+      const list = bySource.get(sourceId) ?? [];
+      list.push(name);
+      bySource.set(sourceId, list);
+    }
   }
 
   const sourceMeta = new Map(sources.map((s) => [s.id, s]));
   const sourceGroupNames: string[] = [];
   const groupLines: string[] = [];
+  const usedGroupNames = new Set<string>(["RELAY", "AUTO", "FALLBACK"]);
 
   for (const [id, names] of bySource) {
     if (names.length === 0) continue;
     const meta = sourceMeta.get(id);
-    const gname = `SRC ${meta?.name || id}`.slice(0, 40);
+    const gname = uniqueName(`SRC ${meta?.name || id}`, usedGroupNames);
     sourceGroupNames.push(gname);
     groupLines.push(`  - name: ${q(gname)}`);
     groupLines.push(`    type: url-test`);
@@ -274,9 +289,7 @@ export function buildMihomoYaml(
   yaml.push(`    expected-status: 204`);
   yaml.push(`    lazy: true`);
   yaml.push(`    proxies:`);
-  for (const n of allNames.length ? allNames : ["DIRECT"]) {
-    yaml.push(`      - ${q(n)}`);
-  }
+  for (const n of allNames.length ? allNames : ["DIRECT"]) yaml.push(`      - ${q(n)}`);
 
   yaml.push(`  - name: ${q("FALLBACK")}`);
   yaml.push(`    type: fallback`);
@@ -302,9 +315,7 @@ export function buildUriList(nodes: Array<ParsedNode | ProbedNode>): string {
 
 export function buildB64Subscription(nodes: Array<ParsedNode | ProbedNode>): string {
   const body = buildUriList(nodes);
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(body, "utf8").toString("base64");
-  }
+  if (typeof Buffer !== "undefined") return Buffer.from(body, "utf8").toString("base64");
   const bytes = new TextEncoder().encode(body);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
