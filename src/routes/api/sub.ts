@@ -51,7 +51,7 @@ export const Route = createFileRoute("/api/sub")({
         }
         const sources = urls.map((u, i) => ({ id: `s${i}`, name: `src-${i + 1}`, url: u, enabled: true }));
         const result = await runScanCached(sources, {
-          perSource: 3000,
+          perSource: 5000,
           globalCap: 20000,
           timeoutMs: 6000,
           real,
