@@ -2,7 +2,7 @@ name: Sync lockfile
 
 on:
   push:
-    branches: [quality-engine-v2, feat/relay-panel-redesign]
+    branches: [quality-engine-v2]
 
 permissions:
   contents: write
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: quality-engine-v2
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -31,4 +31,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package-lock.json
           git commit -m "chore(deps): synchronize package lock [skip lock sync]"
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin HEAD:quality-engine-v2
