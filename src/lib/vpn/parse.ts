@@ -1,3 +1,4 @@
+import { relayLogger } from "@/lib/relay/logger";
 import { cleanRemark, countryFromRemark } from "./countries";
 import type { ParsedNode, VpnProtocol } from "./types";
 
@@ -120,15 +121,7 @@ function parseVless(line: string, sourceId: string, sourceName: string): ParsedN
   const network = mapNetwork(params.type || params.network);
   const name = cleanRemark(remark || `${hostPort.host}:${hostPort.port}`);
   return {
-    id: nodeId([
-      "vless",
-      hostPort.host,
-      hostPort.port,
-      uuid,
-      network,
-      params.path,
-      params.security,
-    ]),
+    id: nodeId(["vless", hostPort.host, hostPort.port, uuid, network, params.path, params.security]),
     uri: line.trim(),
     protocol: "vless",
     name,
@@ -366,59 +359,22 @@ function parseVmess(line: string, sourceId: string, sourceName: string): ParsedN
 function sanitizeNode(node: ParsedNode): ParsedNode | null {
   const copy = { ...node } as ParsedNode;
   for (const key of [
-    "uri",
-    "name",
-    "host",
-    "sourceId",
-    "sourceName",
-    "uuid",
-    "password",
-    "method",
-    "security",
-    "network",
-    "flow",
-    "sni",
-    "fp",
-    "pbk",
-    "sid",
-    "path",
-    "hostHeader",
-    "serviceName",
-    "aid",
+    "uri", "name", "host", "sourceId", "sourceName", "uuid", "password", "method", "security", "network", "flow", "sni", "fp", "pbk", "sid", "path", "hostHeader", "serviceName", "aid",
   ] as const) {
     const value = copy[key];
     if (typeof value === "string") copy[key] = value.trim() as never;
   }
 
   copy.protocol = copy.protocol.trim().toLowerCase() as VpnProtocol;
-  if (
-    !PROTOCOLS.has(copy.protocol) ||
-    !copy.host ||
-    !Number.isInteger(copy.port) ||
-    copy.port < 1 ||
-    copy.port > 65535
-  ) {
-    return null;
-  }
+  if (!PROTOCOLS.has(copy.protocol) || !copy.host || !Number.isInteger(copy.port) || copy.port < 1 || copy.port > 65535) return null;
 
   copy.network = mapNetwork(copy.network);
   if (!NETWORKS.has(copy.network)) return null;
 
-  const alpn = (copy.alpn ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(
-      (value) =>
-        value.length > 0 && value.length <= 32 && ALPN_ALLOWED.has(value),
-    );
+  const alpn = (copy.alpn ?? "").split(",").map((value) => value.trim()).filter((value) => value.length > 0 && value.length <= 32 && ALPN_ALLOWED.has(value));
   copy.alpn = alpn.length ? alpn.join(",") : undefined;
 
-  copy.extra = Object.fromEntries(
-    Object.entries(copy.extra ?? {}).map(([key, value]) => [
-      key.trim(),
-      String(value).trim(),
-    ]),
-  );
+  copy.extra = Object.fromEntries(Object.entries(copy.extra ?? {}).map(([key, value]) => [key.trim(), String(value).trim()]));
 
   if (copy.network === "ws" && !copy.path?.trim()) return null;
   if (copy.network === "grpc" && !copy.serviceName?.trim()) return null;
@@ -427,72 +383,50 @@ function sanitizeNode(node: ParsedNode): ParsedNode | null {
   if (copy.protocol === "ss" && (!copy.password || !copy.method)) return null;
   if (["trojan", "hysteria2"].includes(copy.protocol) && !copy.password) return null;
 
-  copy.id = nodeId([
-    copy.protocol,
-    copy.host,
-    copy.port,
-    copy.uuid,
-    copy.password,
-    copy.method,
-    copy.network,
-    copy.path,
-    copy.security,
-  ]);
+  copy.id = nodeId([copy.protocol, copy.host, copy.port, copy.uuid, copy.password, copy.method, copy.network, copy.path, copy.security]);
   return copy;
 }
 
-export function parseUriLine(
-  line: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode | null {
+export function parseUriLine(line: string, sourceId: string, sourceName: string): ParsedNode | null {
   const trimmed = decodeHtml(line.trim());
   if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) return null;
 
   const lower = trimmed.toLowerCase();
   try {
     let parsed: ParsedNode | null = null;
-
-    if (lower.startsWith("vless://")) {
-      parsed = parseVless(trimmed, sourceId, sourceName);
-    } else if (lower.startsWith("vmess://")) {
-      parsed = parseVmess(trimmed, sourceId, sourceName);
-    } else if (lower.startsWith("ss://")) {
-      parsed = parseSs(trimmed, sourceId, sourceName);
-    } else if (lower.startsWith("trojan://")) {
-      parsed = parseTrojan(trimmed, sourceId, sourceName);
-    } else if (lower.startsWith("hysteria2://") || lower.startsWith("hy2://")) {
-      parsed = parseHysteria2(trimmed, sourceId, sourceName);
-    } else if (lower.startsWith("tuic://")) {
-      parsed = parseTuic(trimmed, sourceId, sourceName);
-    }
-
+    if (lower.startsWith("vless://")) parsed = parseVless(trimmed, sourceId, sourceName);
+    else if (lower.startsWith("vmess://")) parsed = parseVmess(trimmed, sourceId, sourceName);
+    else if (lower.startsWith("ss://")) parsed = parseSs(trimmed, sourceId, sourceName);
+    else if (lower.startsWith("trojan://")) parsed = parseTrojan(trimmed, sourceId, sourceName);
+    else if (lower.startsWith("hysteria2://") || lower.startsWith("hy2://")) parsed = parseHysteria2(trimmed, sourceId, sourceName);
+    else if (lower.startsWith("tuic://")) parsed = parseTuic(trimmed, sourceId, sourceName);
     return parsed === null ? null : sanitizeNode(parsed);
   } catch {
     return null;
   }
 }
 
-export function parseSubscription(
-  raw: string,
-  sourceId: string,
-  sourceName: string,
-): ParsedNode[] {
-  let text = raw.replace(/^\uFEFF/, "").trim();
-  const maybe = tryB64(text);
-  if (maybe && PROTO_RE.test(maybe.trim().split(/\r?\n/)[0] ?? "")) {
-    text = maybe;
-  }
+export function parseSubscription(raw: string, sourceId: string, sourceName: string): ParsedNode[] {
+  const started = Date.now();
+  try {
+    let text = raw.replace(/^\uFEFF/, "").trim();
+    const maybe = tryB64(text);
+    if (maybe && PROTO_RE.test(maybe.trim().split(/\r?\n/)[0] ?? "")) text = maybe;
 
-  const nodes: ParsedNode[] = [];
-  const seen = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const node = parseUriLine(line, sourceId, sourceName);
-    if (!node || seen.has(node.id)) continue;
-    seen.add(node.id);
-    nodes.push(node);
+    const nodes: ParsedNode[] = [];
+    const seen = new Set<string>();
+    for (const line of text.split(/\r?\n/)) {
+      const node = parseUriLine(line, sourceId, sourceName);
+      if (!node || seen.has(node.id)) continue;
+      seen.add(node.id);
+      nodes.push(node);
+    }
+    relayLogger.info("parse", "Subscription parsed", { sourceId, sourceName, inputLines: text.split(/\r?\n/).length, nodes: nodes.length, durationMs: Date.now() - started });
+    return nodes;
+  } catch (err) {
+    relayLogger.error("parse", "Subscription parse failed", { sourceId, sourceName, durationMs: Date.now() - started, error: err instanceof Error ? err.message : String(err) });
+    throw err;
   }
-  return nodes;
 }
 
 export function endpointKey(node: { host: string; port: number }): string {
@@ -500,14 +434,5 @@ export function endpointKey(node: { host: string; port: number }): string {
 }
 
 export function protocolRank(p: VpnProtocol): number {
-  return (
-    {
-      vless: 1,
-      vmess: 2,
-      trojan: 3,
-      ss: 4,
-      hysteria2: 5,
-      tuic: 6,
-    } as Record<VpnProtocol, number>
-  )[p] ?? 99;
+  return ({ vless: 1, vmess: 2, trojan: 3, ss: 4, hysteria2: 5, tuic: 6 } as Record<VpnProtocol, number>)[p] ?? 99;
 }
