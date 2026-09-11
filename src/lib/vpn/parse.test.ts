@@ -14,6 +14,15 @@ test("parser trims transport values and sanitizes ALPN", () => {
   assert.equal(node.uri, uri);
 });
 
+test("parser preserves xhttp transport and options", () => {
+  const uri = "vless://11111111-1111-1111-1111-111111111111@example.com:443?type=xhttp&security=reality&path=%2F&mode=packet-up&sni=example.com&pbk=public-key";
+  const [node] = parseSubscription(uri, "test", "test");
+  assert.ok(node);
+  assert.equal(node.network, "xhttp");
+  assert.equal(node.path, "/");
+  assert.equal(node.extra.mode, "packet-up");
+});
+
 test("parser rejects empty required grpc and websocket options", () => {
   const base = "vless://11111111-1111-1111-1111-111111111111@example.com:443";
   assert.equal(parseSubscription(`${base}?type=grpc&serviceName=%20`, "test", "test").length, 0);
