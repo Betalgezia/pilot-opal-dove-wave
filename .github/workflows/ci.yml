@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,22 +18,9 @@ jobs:
         run: npm install --package-lock-only --dry-run --ignore-scripts
       - name: Clean install
         run: npm ci
-      - name: Mihomo config tests
+      - name: Mihomo Windows tests
         run: npm run test:mihomo
       - name: Typecheck
         run: npm run typecheck
       - name: Build
         run: npm run build
-
-  windows-mihomo:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Clean install
-        run: npm ci
-      - name: Mihomo Windows tests
-        run: npm run test:mihomo
