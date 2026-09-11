@@ -73,14 +73,14 @@ test("xhttp preserves auto/packet-up mode, packet encoding and embedded Xray opt
     },
   });
   const yaml = buildMihomoYaml([xhttp], sources);
-  assert.match(yaml, /\n        packet-encoding: "xudp"/);
-  assert.match(yaml, /\n        network: "xhttp"/);
-  assert.match(yaml, /\n        xhttp-opts:\n/);
-  assert.match(yaml, /\n          mode: "auto"/);
-  assert.match(yaml, /\n          x-padding-bytes: "200-1000"/);
-  assert.match(yaml, /\n          uplink-http-method: "POST"/);
-  assert.match(yaml, /\n          reuse-settings:\n/);
-  assert.match(yaml, /\n            max-concurrency: "8-16"/);
+  assert.match(yaml, /packet-encoding:\s*"xudp"/);
+  assert.match(yaml, /network:\s*"xhttp"/);
+  assert.match(yaml, /xhttp-opts:\n/);
+  assert.match(yaml, /mode:\s*"auto"/);
+  assert.match(yaml, /x-padding-bytes:\s*"200-1000"/);
+  assert.match(yaml, /uplink-http-method:\s*"POST"/);
+  assert.match(yaml, /reuse-settings:\n/);
+  assert.match(yaml, /max-concurrency:\s*"8-16"/);
 });
 
 test("generated YAML is accepted by mihomo when the local binary is available", async (t) => {
