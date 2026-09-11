@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildMihomoYaml } from "./mihomo.ts";
-import { buildProbeYaml } from "./mihomo-probe.server.ts";
+import { buildProbeYaml, freePort } from "./mihomo-probe.server.ts";
 import { canRunMihomo, ensureMihomoBinary } from "./mihomo-bin.server.ts";
 import type { ParsedNode, SourceScan } from "./types.ts";
 
@@ -123,6 +123,31 @@ async function validateWithMihomo(label: string, yaml: string): Promise<void> {
   }
 }
 
+async function startMihomoAndWait(bin: string, yaml: string): Promise<{ child: ReturnType<typeof spawn>; dir: string; diagnostics: () => string }> {
+  const apiPort = await freePort();
+  const mixedPort = await freePort();
+  const dir = await mkdtemp(path.join(tmpdir(), "relay-startup-test-"));
+  const config = path.join(dir, "config.yaml");
+  await writeFile(config, buildProbeYaml([{ node, name: "n001" }], "https://example.com/generate_204", apiPort, mixedPort, 6000).replace("example.com", "example.invalid"), "utf8");
+  const child = spawn(bin, ["-d", dir, "-f", config], { stdio: ["ignore", "pipe", "pipe"], windowsHide: process.platform === "win32" });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (buf) => { stdout += buf.toString(); });
+  child.stderr.on("data", (buf) => { stderr += buf.toString(); });
+  const started = Date.now();
+  while (Date.now() - started < 8000) {
+    if (child.exitCode !== null) throw new Error(`mihomo exited with code ${child.exitCode}: ${(stderr || stdout).trim() || "no diagnostics"}`);
+    try {
+      const res = await fetch(`http://127.0.0.1:${apiPort}/version`, { signal: AbortSignal.timeout(400) });
+      if (res.ok) return { child, dir, diagnostics: () => [stderr, stdout].filter(Boolean).join(" | ") };
+    } catch {
+      // API is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  throw new Error(`mihomo API did not start: ${(stderr || stdout).trim() || "no diagnostics"}`);
+}
+
 test("generated export YAML is accepted by mihomo when the local binary is available", async (t) => {
   if (!canRunMihomo()) {
     t.skip("mihomo binary is not available in this environment");
@@ -145,4 +170,23 @@ test("generated xhttp export and probe YAML are accepted by mihomo when the loca
   });
   await validateWithMihomo("xhttp-export", buildMihomoYaml([xhttp], sources));
   await validateWithMihomo("xhttp-probe", buildProbeYaml([{ node: xhttp, name: "n001" }], "https://example.com/generate_204", 40125, 40126, 6000));
+});
+
+test("mihomo probe config starts successfully on a local runtime", async (t) => {
+  if (!canRunMihomo()) {
+    t.skip("mihomo binary is not available in this environment");
+    return;
+  }
+  const bin = await ensureMihomoBinary();
+  let child: ReturnType<typeof spawn> | null = null;
+  let dir: string | null = null;
+  try {
+    const started = await startMihomoAndWait(bin, buildProbeYaml([{ node, name: "n001" }], "https://example.com/generate_204", await freePort(), await freePort(), 6000));
+    child = started.child;
+    dir = started.dir;
+    assert.ok(child.exitCode === null, started.diagnostics());
+  } finally {
+    if (child && child.exitCode === null) child.kill();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
 });
