@@ -49,6 +49,83 @@ function uniqueName(base: string, used: Set<string>): string {
   return name;
 }
 
+function embeddedExtra(node: ParsedNode): Record<string, unknown> {
+  const raw = node.extra?.extra;
+  if (!raw || raw === "null") return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function textValue(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return value.trim();
+}
+
+function boolValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) return value.trim().toLowerCase() === "true";
+  return undefined;
+}
+
+function addXhttpExtra(out: Record<string, unknown>, extra: Record<string, unknown>): void {
+  const map: Array<[string, string]> = [
+    ["xPaddingBytes", "x-padding-bytes"],
+    ["xPaddingKey", "x-padding-key"],
+    ["xPaddingHeader", "x-padding-header"],
+    ["xPaddingPlacement", "x-padding-placement"],
+    ["xPaddingMethod", "x-padding-method"],
+    ["uplinkHTTPMethod", "uplink-http-method"],
+    ["sessionPlacement", "session-placement"],
+    ["sessionKey", "session-key"],
+    ["sessionTable", "session-table"],
+    ["sessionLength", "session-length"],
+    ["seqPlacement", "seq-placement"],
+    ["seqKey", "seq-key"],
+    ["uplinkDataPlacement", "uplink-data-placement"],
+    ["uplinkDataKey", "uplink-data-key"],
+    ["uplinkChunkSize", "uplink-chunk-size"],
+    ["noGRPCHeader", "no-grpc-header"],
+    ["noSSEHeader", "no-sse-header"],
+    ["scMaxEachPostBytes", "sc-max-each-post-bytes"],
+    ["scMinPostsIntervalMs", "sc-min-posts-interval-ms"],
+  ];
+  for (const [from, to] of map) {
+    const value = extra[from];
+    const text = textValue(value);
+    if (text !== undefined) out[to] = text;
+    const bool = boolValue(value);
+    if (bool !== undefined) out[to] = bool;
+    if (typeof value === "number") out[to] = value;
+  }
+  const paddingObfs = boolValue(extra.xPaddingObfsMode);
+  if (paddingObfs !== undefined) out["x-padding-obfs-mode"] = paddingObfs;
+  const mode = textValue(extra.mode);
+  if (mode && ["auto", "stream-one", "stream-up", "packet-up"].includes(mode)) out.mode = mode;
+  const nestedXmux = extra.xmux;
+  if (nestedXmux && typeof nestedXmux === "object" && !Array.isArray(nestedXmux)) {
+    const xmux = nestedXmux as Record<string, unknown>;
+    const reuse: Record<string, unknown> = {};
+    const reuseMap: Array<[string, string]> = [
+      ["maxConcurrency", "max-concurrency"],
+      ["maxConnections", "max-connections"],
+      ["cMaxReuseTimes", "c-max-reuse-times"],
+      ["hMaxRequestTimes", "h-max-request-times"],
+      ["hMaxReusableSecs", "h-max-reusable-secs"],
+      ["hKeepAlivePeriod", "h-keep-alive-period"],
+    ];
+    for (const [from, to] of reuseMap) {
+      const value = xmux[from];
+      if (typeof value === "string" && value.trim()) reuse[to] = value.trim();
+      else if (typeof value === "number") reuse[to] = value;
+    }
+    if (Object.keys(reuse).length) out["reuse-settings"] = reuse;
+  }
+}
+
 export function clashProxyObject(node: ParsedNode, name: string): Record<string, unknown> {
   switch (node.protocol) {
     case "vless": {
@@ -62,6 +139,8 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
         network: node.network || "tcp",
       };
       if (node.flow) obj.flow = node.flow.replace(/-udp443$/, "");
+      const packetEncoding = node.extra.packetEncoding;
+      if (packetEncoding === "xudp" || packetEncoding === "packetaddr") obj["packet-encoding"] = packetEncoding;
       const tls =
         node.security === "tls" ||
         node.security === "reality" ||
@@ -71,6 +150,7 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
       if (node.sni) obj.servername = node.sni;
       if (node.fp) obj["client-fingerprint"] = node.fp;
       if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (node.insecure) obj["skip-cert-verify"] = true;
       if (node.security === "reality" && node.pbk) {
         obj["reality-opts"] = {
           "public-key": node.pbk,
@@ -126,9 +206,12 @@ export function clashProxyObject(node: ParsedNode, name: string): Record<string,
         udp: true,
         network: node.network || "tcp",
       };
+      const packetEncoding = node.extra.packetEncoding;
+      if (packetEncoding === "xudp" || packetEncoding === "packetaddr") obj["packet-encoding"] = packetEncoding;
       if (node.security === "tls" || node.extra.tls === "tls") obj.tls = true;
       if (node.sni) obj.servername = node.sni;
       if (node.alpn) obj.alpn = node.alpn.split(",").map((s) => s.trim()).filter(Boolean);
+      if (node.insecure) obj["skip-cert-verify"] = true;
       applyNetworkOpts(obj, node);
       return obj;
     }
@@ -164,9 +247,7 @@ function applyNetworkOpts(obj: Record<string, unknown>, node: ParsedNode) {
   if (net === "ws") {
     obj["ws-opts"] = {
       path: node.path || "/",
-      ...(node.hostHeader
-        ? { headers: { Host: node.hostHeader } }
-        : {}),
+      ...(node.hostHeader ? { headers: { Host: node.hostHeader } } : {}),
     };
   } else if (net === "grpc") {
     obj["grpc-opts"] = {
@@ -188,13 +269,15 @@ function applyNetworkOpts(obj: Record<string, unknown>, node: ParsedNode) {
     };
   } else if (net === "xhttp") {
     obj.network = "xhttp";
-    const mode = node.extra.mode;
-    const validMode = mode === "stream-one" || mode === "stream-up" || mode === "packet-up" ? mode : undefined;
-    obj["xhttp-opts"] = {
+    const xhttp: Record<string, unknown> = {
       path: node.path || "/",
       ...(node.hostHeader ? { host: node.hostHeader } : {}),
-      ...(validMode ? { mode: validMode } : {}),
     };
+    const mode = node.extra.mode;
+    if (["auto", "stream-one", "stream-up", "packet-up"].includes(mode)) xhttp.mode = mode;
+    addXhttpExtra(xhttp, embeddedExtra(node));
+    if (node.extra.xPaddingBytes && !xhttp["x-padding-bytes"]) xhttp["x-padding-bytes"] = node.extra.xPaddingBytes;
+    obj["xhttp-opts"] = xhttp;
   }
 }
 
