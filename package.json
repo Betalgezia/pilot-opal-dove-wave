@@ -14,7 +14,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test:mihomo": "node --experimental-strip-types --experimental-specifier-resolution=node --test src/lib/vpn/mihomo.test.ts",
+    "test:mihomo": "node --experimental-strip-types --import ./scripts/register-ts-loader.mjs --test src/lib/vpn/mihomo.test.ts",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/vpn/quality.test.ts src/lib/vpn/parse.test.ts src/lib/vpn/mihomo.test.ts src/lib/vpn/node-identity.test.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
