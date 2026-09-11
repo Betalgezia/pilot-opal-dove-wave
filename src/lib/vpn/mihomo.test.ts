@@ -48,7 +48,7 @@ test("generated YAML uses unique proxy names on collisions", () => {
   assert.ok(names.some((name) => name.endsWith("-2")));
 });
 
-test("xhttp drops unsupported auto mode and keeps only valid ALPN", () => {
+test("xhttp preserves supported mode and keeps only valid ALPN", () => {
   const xhttp = makeNode("xhttp");
   Object.assign(xhttp, {
     protocol: "vless ",
@@ -82,7 +82,7 @@ test("xhttp drops unsupported auto mode and keeps only valid ALPN", () => {
   assert.match(yaml, /network: "xhttp"/);
   assert.match(yaml, /alpn: \["h2", "http\/1\.1"\]/);
   assert.doesNotMatch(yaml, /alpn:.*garbage/);
-  assert.doesNotMatch(yaml, /mode: "auto"/);
+  assert.match(yaml, /mode: "auto"/);
   assert.match(yaml, /xhttp-opts:\n/);
   assert.match(yaml, /x-padding-bytes:\s*"200-1000"/);
   assert.match(yaml, /uplink-http-method:\s*"POST"/);
@@ -99,7 +99,7 @@ test("probe YAML uses block lists and sanitizes proxy values", () => {
   assert.match(yaml, /\nproxy-groups:\n  - name: "RELAYTEST"/);
   assert.match(yaml, /\n      - "n001"/);
   assert.match(yaml, /\nrules:\n  - MATCH,RELAYTEST\n$/);
-  assert.doesNotMatch(yaml, /mode: "auto"/);
+  assert.match(yaml, /mode: "auto"/);
   assert.match(yaml, /alpn: \["h3"\]/);
   for (const line of yaml.split("\n")) assert.equal(line, line.trimEnd(), `trailing whitespace: ${JSON.stringify(line)}`);
 });
