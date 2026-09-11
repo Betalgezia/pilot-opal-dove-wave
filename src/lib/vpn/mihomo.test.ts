@@ -49,7 +49,8 @@ test("generated YAML uses unique proxy names on collisions", () => {
 });
 
 test("xhttp drops unsupported auto mode and keeps only valid ALPN", () => {
-  const xhttp = makeNode("xhttp", {
+  const xhttp = makeNode("xhttp");
+  Object.assign(xhttp, {
     protocol: "vless ",
     network: "xhttp ",
     uri: "vless://xhttp@example.com:443?type=xhttp&security=reality&path=%2Fauth&mode=auto&alpn=garbage,%20h2,%20http/1.1%20&packetEncoding=xudp",
@@ -91,7 +92,9 @@ test("xhttp drops unsupported auto mode and keeps only valid ALPN", () => {
 });
 
 test("probe YAML uses block lists and sanitizes proxy values", () => {
-  const yaml = buildProbeYaml([{ node: makeNode("probe", { protocol: "vless ", network: "xhttp ", alpn: "bad, h3 ", extra: { mode: "auto" } }), name: "n001 " }], "https://example.com/generate_204 ", 40123, 40124, 6000);
+  const probeNode = makeNode("probe");
+  Object.assign(probeNode, { protocol: "vless ", network: "xhttp ", alpn: "bad, h3 ", extra: { mode: "auto" } });
+  const yaml = buildProbeYaml([{ node: probeNode, name: "n001 " }], "https://example.com/generate_204 ", 40123, 40124, 6000);
   assert.match(yaml, /^proxies:\n  - name: "n001"/m);
   assert.match(yaml, /\nproxy-groups:\n  - name: "RELAYTEST"/);
   assert.match(yaml, /\n      - "n001"/);
@@ -133,7 +136,8 @@ test("generated xhttp export and probe YAML are accepted by mihomo when the loca
     t.skip("mihomo binary is not available in this environment");
     return;
   }
-  const xhttp = makeNode("xhttp-runtime", {
+  const xhttp = makeNode("xhttp-runtime");
+  Object.assign(xhttp, {
     network: "xhttp",
     security: "reality",
     alpn: "h2, http/1.1",
