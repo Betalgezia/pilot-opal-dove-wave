@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+echo "[pre-commit] Проверка package.json / package-lock.json..."
+npm install --package-lock-only --dry-run --ignore-scripts
+
+echo "[pre-commit] Проверка зависимостей пройдена."
