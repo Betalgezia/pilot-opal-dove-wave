@@ -4,6 +4,7 @@ import path from "node:path";
 
 const DISK_CACHE_PATH = path.join(process.cwd(), ".relay-cache", "geoip.json");
 const memoryByIp = new Map<string, string | null>();
+const memoryByHost = new Map<string, string | null>();
 let diskLoaded = false;
 let persistTimer: NodeJS.Timeout | null = null;
 
@@ -11,9 +12,8 @@ async function loadDiskCache(): Promise<void> {
   if (diskLoaded) return;
   diskLoaded = true;
   try {
-    const raw = await readFile(DISK_CACHE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    for (const [ip, country] of Object.entries(parsed)) {
+    const raw = JSON.parse(await readFile(DISK_CACHE_PATH, "utf8")) as Record<string, unknown>;
+    for (const [ip, country] of Object.entries(raw)) {
       if (country === null || typeof country === "string") memoryByIp.set(ip, country as string | null);
     }
   } catch {
@@ -51,7 +51,6 @@ function isIp(value: string): boolean {
 async function lookupOffline(ip: string): Promise<string | null> {
   await loadDiskCache();
   if (memoryByIp.has(ip)) return memoryByIp.get(ip) ?? null;
-
   try {
     const mod = await import("geoip-country");
     const result = mod.default?.lookup?.(ip) ?? mod.lookup?.(ip);
@@ -65,19 +64,25 @@ async function lookupOffline(ip: string): Promise<string | null> {
 }
 
 async function resolveIp(host: string): Promise<string | null> {
-  const normalized = host.trim().replace(/^\[|\]$/g, "");
+  const normalized = host.trim().replace(/^\[|\]$/g, "").toLowerCase();
   if (!normalized) return null;
   if (isIp(normalized)) return normalized;
+  if (memoryByHost.has(normalized)) return memoryByHost.get(normalized) ?? null;
   try {
     const records = await dns.lookup(normalized, { all: true, verbatim: true });
-    return records[0]?.address ?? null;
+    const ip = records[0]?.address ?? null;
+    memoryByHost.set(normalized, ip);
+    return ip;
   } catch {
+    memoryByHost.set(normalized, null);
     return null;
   }
 }
 
 async function enrichOne<T extends { host: string; country: string | null; serverIp?: string }>(node: T): Promise<T> {
-  const ip = await resolveIp(node.host);
+  const host = node.host.trim();
+  if (!isIp(host) && node.country && node.country !== "XX") return node;
+  const ip = await resolveIp(host);
   if (!ip) return node;
   const geoCountry = await lookupOffline(ip);
   return { ...node, serverIp: ip, country: geoCountry ?? node.country };
