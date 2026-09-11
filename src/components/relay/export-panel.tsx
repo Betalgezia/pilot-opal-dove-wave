@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { encodeSourceParam } from "@/lib/vpn/github";
 import { buildMihomoYaml } from "@/lib/vpn/mihomo";
 import { getPanelFilters, savePanelFilters } from "@/lib/vpn/panel-filters.functions";
 import { EMPTY_FILTERS, PROTOCOL_OPTIONS, filteredAliveCount, type SubscriptionFilters } from "@/lib/vpn/subscription-filter";
@@ -53,7 +52,6 @@ export function ExportPanel({
   const [selectedLanIp, setSelectedLanIp] = useState("");
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
-  const enabled = sources.filter((s) => s.enabled).map((s) => s.url);
 
   useEffect(() => {
     void getPanelFilters()
@@ -103,18 +101,11 @@ export function ExportPanel({
   }, [hostMode, selectedLanIp, lanIps]);
 
   const panelUrl = useMemo(() => {
-    if (!enabled.length) return "";
-    const params = new URLSearchParams({
-      u: encodeSourceParam(enabled),
-      fmt,
-      n: String(n),
-      real: real ? "1" : "0",
-      fp: "panel",
-    });
+    if (!sources.some((source) => source.enabled)) return "";
     const port = typeof window !== "undefined" && window.location.port ? window.location.port : "8080";
     const base = selectedHost === "localhost" ? `http://localhost:${port}` : `http://${selectedHost}:${port}`;
-    return `${base}/api/sub?${params.toString()}`;
-  }, [enabled, fmt, n, real, selectedHost]);
+    return `${base}/api/sub?live=1`;
+  }, [sources, selectedHost]);
 
   const countryOptions = useMemo(
     () => [...new Set((result?.nodes ?? []).map((node) => (node.country ?? "").toUpperCase()).filter(Boolean))].sort(),
@@ -151,25 +142,25 @@ export function ExportPanel({
 
   async function copy(text: string) {
     if (!text) {
-      toast.error("Сначала выполните сканирование");
+      toast.error("Добавьте и включите хотя бы один источник");
       return;
     }
     await navigator.clipboard.writeText(text);
     setCopied(true);
-    toast.success("Ссылка скопирована");
+    toast.success("Постоянная ссылка скопирована");
     window.setTimeout(() => setCopied(false), 1500);
   }
 
   async function downloadSubscription() {
     if (!panelUrl) {
-      toast.error("Сначала выполните сканирование");
+      toast.error("Добавьте и включите хотя бы один источник");
       return;
     }
     try {
       const response = await fetch(panelUrl, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
-      const extension = fmt === "clash" ? "yaml" : fmt === "b64" ? "txt" : "txt";
+      const extension = fmt === "clash" ? "yaml" : "txt";
       const mime = fmt === "clash" ? "text/yaml;charset=utf-8" : "text/plain;charset=utf-8";
       const blob = new Blob([text], { type: mime });
       const url = URL.createObjectURL(blob);
@@ -198,7 +189,7 @@ export function ExportPanel({
                 <h2 className="text-sm font-medium">Живая подписка</h2>
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-fg-muted">
-                Ссылка постоянно отдаёт актуальный пул. Для телефона используй IP этого ПК, а не localhost.
+                Ссылка постоянная: меняется содержимое подписки, а не адрес. Для телефона используй IP этого ПК, а не localhost.
               </p>
             </div>
             <span className="rounded-full bg-live/10 px-2.5 py-1 text-[10px] font-medium text-live">LIVE</span>
@@ -208,7 +199,7 @@ export function ExportPanel({
         <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_190px]">
           <div className="min-w-0">
             <div className="rounded-xl border border-primary/10 bg-bg-subtle p-3 font-mono text-[11px] leading-relaxed break-all text-fg">
-              {panelUrl || "Выполните сканирование, чтобы получить ссылку."}
+              {panelUrl || "Добавьте и включите источник, чтобы получить ссылку."}
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -320,7 +311,7 @@ export function ExportPanel({
             ) : (
               <div className="text-center text-xs text-slate-500">
                 <QrCode className="mx-auto mb-2 size-8" />
-                <p>{panelUrl ? "Генерация QR…" : "QR появится после сканирования"}</p>
+                <p>{panelUrl ? "Генерация QR…" : "QR появится после добавления источника"}</p>
               </div>
             )}
             {panelUrl && selectedHost !== "localhost" && selectedHost !== "127.0.0.1" ? (
