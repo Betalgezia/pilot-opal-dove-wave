@@ -3,7 +3,7 @@ import { relayLogger, type LogLevel } from "@/lib/relay/logger";
 
 const levels = new Set<LogLevel>(["info", "warn", "error"]);
 
-export const Route = createFileRoute("/api/logs" as never)({
+export const Route = createFileRoute("/api/logs")({
   server: {
     handlers: {
       GET: async ({ request }) => {
