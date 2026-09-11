@@ -1,3 +1,4 @@
+import { relayLogger } from "@/lib/relay/logger";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -12,7 +13,8 @@ import type { ParsedNode, ProbedNode } from "./types";
 const MIHOMO_ROUND_SIZE = 800;
 const DEEP_CACHE_MS = 900_000;
 const DEEP_EXPECTED_STATUS = "200-299";
-const STDERR_LIMIT = 4000;
+const STDERR_PREVIEW_LIMIT = 4000;
+const FAILURE_PREVIEW_LIMIT = 1200;
 const deepCache = new Map<string, { at: number; ok: boolean }>();
 let lock: Promise<unknown> = Promise.resolve();
 
@@ -69,20 +71,24 @@ async function waitApi(port: number, timeoutMs: number): Promise<void> { const s
 async function killChild(child: ChildProcess): Promise<void> { if (child.exitCode !== null) return; await new Promise<void>((resolve) => { let settled = false; const finish = () => { if (settled) return; settled = true; clearTimeout(forceTimer); child.removeListener("exit", onExit); child.removeListener("error", onError); resolve(); }; const onExit = () => finish(); const onError = () => finish(); const forceTimer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} setTimeout(finish, 200).unref(); }, 1200); forceTimer.unref(); child.once("exit", onExit); child.once("error", onError); try { child.kill("SIGTERM"); } catch { finish(); } }); }
 function isAliveDelay(delay: unknown): delay is number { return typeof delay === "number" && delay >= 0 && delay < 65535; }
 async function groupDelays(apiPort: number, testUrl: string, timeoutMs: number, perRequestTimeoutMs: number): Promise<Record<string, number>> { const url = new URL(`http://127.0.0.1:${apiPort}/group/RELAYTEST/delay`); url.searchParams.set("url", testUrl); url.searchParams.set("timeout", String(timeoutMs)); url.searchParams.set("expected", DEEP_EXPECTED_STATUS); const res = await fetch(url, { signal: AbortSignal.timeout(Math.max(timeoutMs + 20_000, perRequestTimeoutMs + 20_000)) }); if (!res.ok) throw new Error(`healthcheck ${res.status}`); const data = (await res.json()) as Record<string, unknown>; const out: Record<string, number> = {}; for (const [k, v] of Object.entries(data)) if (typeof v === "number") out[k] = v; return out; }
-function formatMihomoExit(code: number | null, signal: NodeJS.Signals | null, diagnostics: string): string { const details = diagnostics.trim().replace(/\s+/g, " "); const exit = signal ? `сигнал ${signal}` : `код ${code ?? "?"}`; return `mihomo вышел (${exit})${details ? `: ${details.slice(0, 1200)}` : ". mihomo не сообщил диагностику."}`; }
+function formatMihomoExit(code: number | null, signal: NodeJS.Signals | null, diagnostics: string): string { const details = diagnostics.trim().replace(/\s+/g, " "); const exit = signal ? `сигнал ${signal}` : `код ${code ?? "?"}`; return `mihomo вышел (${exit})${details ? `: ${details.slice(0, FAILURE_PREVIEW_LIMIT)}` : ". mihomo не сообщил диагностику."}`; }
 async function runOnce(nodes: ParsedNode[], testUrl: string, timeoutMs: number): Promise<{ delays: Map<string, number | null>; loaded: number; delayed: number; unknown: number }> {
   const named = nodes.filter(usable).map((node, i) => ({ node, name: `n${String(i + 1).padStart(3, "0")}` })); const delays = new Map<string, number | null>(); for (const node of nodes) delays.set(node.id, null); if (!named.length) return { delays, loaded: 0, delayed: 0, unknown: nodes.length };
-  const bin = await ensureMihomoBinary(); const apiPort = await freePort(); const mixedPort = await freePort(); const dir = await mkdtemp(path.join(tmpdir(), "relay-probe-")); const configPath = path.join(dir, "config.yaml"); const probeTimeout = Math.max(1000, Math.min(8000, timeoutMs)); await writeFile(configPath, buildProbeYaml(named, testUrl, apiPort, mixedPort, probeTimeout), "utf8");
-  let stdout = ""; let stderr = ""; const append = (target: "stdout" | "stderr", chunk: string) => { if (target === "stdout") { if (stdout.length < STDERR_LIMIT) stdout += chunk.slice(0, STDERR_LIMIT - stdout.length); } else if (stderr.length < STDERR_LIMIT) stderr += chunk.slice(0, STDERR_LIMIT - stderr.length); };
+  const bin = await ensureMihomoBinary(); const apiPort = await freePort(); const mixedPort = await freePort(); const dir = await mkdtemp(path.join(tmpdir(), "relay-probe-")); const configPath = path.join(dir, "config.yaml"); const probeTimeout = Math.max(1000, Math.min(8000, timeoutMs)); const config = buildProbeYaml(named, testUrl, apiPort, mixedPort, probeTimeout); await writeFile(configPath, config, "utf8");
+  const command = [bin, "-d", dir, "-f", configPath]; relayLogger.info("mihomo", "Starting mihomo", { command: command.join(" "), configPath, nodeCount: named.length, apiPort, mixedPort, timeoutMs: probeTimeout });
+  let stdout = ""; let stderr = ""; const started = Date.now(); const appendStdout = (chunk: string) => { if (stdout.length < STDERR_PREVIEW_LIMIT) stdout += chunk.slice(0, STDERR_PREVIEW_LIMIT - stdout.length); }; const appendStderr = (chunk: string) => { stderr += chunk; };
   const child = spawn(bin, ["-d", dir, "-f", configPath], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SKIP_SYSTEM_PROXY: "1" }, windowsHide: process.platform === "win32" });
-  registerMihomoChild(child); child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8"); child.stdout?.on("data", (chunk: string) => append("stdout", chunk)); child.stderr?.on("data", (chunk: string) => append("stderr", chunk));
+  registerMihomoChild(child); child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8"); child.stdout?.on("data", (chunk: string) => appendStdout(chunk)); child.stderr?.on("data", (chunk: string) => appendStderr(chunk));
   try {
     const died = new Promise<never>((_, reject) => { let exitCode: number | null = null; let exitSignal: NodeJS.Signals | null = null; child.once("exit", (code, signal) => { exitCode = code; exitSignal = signal; }); child.once("close", () => reject(new Error(formatMihomoExit(exitCode, exitSignal, [stderr, stdout].filter(Boolean).join(" | "))))); child.once("error", (err) => setImmediate(() => reject(err))); });
     try { await Promise.race([waitApi(apiPort, 8000), died]); }
-    catch (err) { if (err instanceof Error) throw err; throw new Error(String(err)); }
-    const measured = await groupDelays(apiPort, testUrl, probeTimeout, probeTimeout); for (const { node, name } of named) { const delay = measured[name]; delays.set(node.id, isAliveDelay(delay) ? delay : null); } return { delays, loaded: named.length, delayed: Object.keys(measured).length, unknown: 0 };
+    catch (err) { const durationMs = Date.now() - started; relayLogger.error("mihomo", "Mihomo failed to start", { durationMs, stderr, stdout, error: err instanceof Error ? err.message : String(err), configPath, command: command.join(" ") }); throw err; }
+    relayLogger.info("mihomo", "Mihomo API ready", { durationMs: Date.now() - started, apiPort, nodeCount: named.length });
+    const measured = await groupDelays(apiPort, testUrl, probeTimeout, probeTimeout); for (const { node, name } of named) { const delay = measured[name]; delays.set(node.id, isAliveDelay(delay) ? delay : null); }
+    relayLogger.info("mihomo", "Mihomo probe completed", { durationMs: Date.now() - started, nodeCount: named.length, delayReceived: Object.keys(measured).length, stderr });
+    return { delays, loaded: named.length, delayed: Object.keys(measured).length, unknown: 0 };
   }
-  finally { unregisterMihomoChild(child); await killChild(child); await rm(dir, { recursive: true, force: true }).catch(() => undefined); }
+  finally { unregisterMihomoChild(child); await killChild(child); await rm(dir, { recursive: true, force: true }).catch(() => undefined); relayLogger.info("mihomo", "Mihomo process cleaned up", { durationMs: Date.now() - started, apiPort, mixedPort }); }
 }
 
 export async function probeNodesMihomo(nodes: ParsedNode[], testUrl = DEFAULT_TEST_URL, timeoutMs = 6000): Promise<{ nodes: ProbedNode[]; testUrl: string; note: string | null; metrics: { mihomoLoaded: number; mihomoDelayReceived: number; unknown: number; rounds: number } }> {
@@ -97,6 +103,7 @@ export async function probeNodesMihomo(nodes: ParsedNode[], testUrl = DEFAULT_TE
       } catch (err) {
         unknown += round.length; for (const node of round) probed.set(node.id, { ...node, latency: null, alive: false, probeState: "unknown" });
         failureNote = err instanceof Error ? err.message : String(err);
+        relayLogger.error("mihomo", "Mihomo probe round failed", { round: rounds, nodeCount: round.length, error: failureNote });
         if (nodes.length <= MIHOMO_ROUND_SIZE) throw err;
       }
     }
