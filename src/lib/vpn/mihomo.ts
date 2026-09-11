@@ -1,7 +1,7 @@
 import type { ParsedNode, ProbedNode, SourceScan } from "./types";
 
 const ALPN_ALLOWED = new Set(["h2", "http/1.1", "h3"]);
-const XHTTP_MODES = new Set(["stream-one", "stream-up", "packet-up"]);
+const XHTTP_MODES = new Set(["auto", "stream-one", "stream-up", "packet-up"]);
 
 function q(value: string): string {
   return JSON.stringify(value.trim());
