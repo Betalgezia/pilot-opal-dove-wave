@@ -38,9 +38,29 @@ function usable(node: ParsedNode): boolean {
 }
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
 export function freePort(): Promise<number> { return new Promise((resolve, reject) => { const s = net.createServer(); s.unref(); s.on("error", reject); s.listen(0, "127.0.0.1", () => { const addr = s.address(); const port = typeof addr === "object" && addr ? addr.port : 0; s.close((err) => err ? reject(err) : resolve(port)); }); }); }
+function sanitizeProbeNode(node: ParsedNode): ParsedNode {
+  const copy = { ...node, extra: { ...node.extra } };
+  const raw = copy.extra.extra;
+  if (typeof raw !== "string" || !raw.trim()) return copy;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return copy;
+    const extra = { ...(parsed as Record<string, unknown>) };
+    for (const key of ["scMaxEachPostBytes", "scMinPostsIntervalMs"]) {
+      const value = extra[key];
+      const numberValue = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+      if (!Number.isFinite(numberValue) || numberValue <= 0) delete extra[key];
+      else extra[key] = Math.floor(numberValue);
+    }
+    copy.extra.extra = JSON.stringify(extra);
+  } catch {
+    // Keep the original extra payload; invalid JSON is handled by the generator.
+  }
+  return copy;
+}
 export function buildProbeYaml(named: Array<{ node: ParsedNode; name: string }>, testUrl: string, apiPort: number, mixedPort: number, timeoutMs: number): string {
   const lines = [`mixed-port: ${mixedPort}`, `bind-address: 127.0.0.1`, `allow-lan: false`, `mode: global`, `log-level: error`, `ipv6: true`, `unified-delay: true`, `tcp-concurrent: true`, `find-process-mode: off`, `geo-auto-update: false`, `external-controller: 127.0.0.1:${apiPort}`, `secret: ""`, ``, `dns:`, `  enable: true`, `  enhanced-mode: fake-ip`, `  nameserver:`, `    - 1.1.1.1`, `    - 8.8.8.8`, ``, `proxies:`];
-  for (const { node, name } of named) { const obj = clashProxyObject(node, name); lines.push(`  - name: ${q(name)}`); lines.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:"))); }
+  for (const { node, name } of named) { const obj = clashProxyObject(sanitizeProbeNode(node), name); lines.push(`  - name: ${q(name)}`); lines.push(...indent(obj, 4).filter((l) => !l.trimStart().startsWith("name:"))); }
   lines.push(``, `proxy-groups:`, `  - name: "RELAYTEST"`, `    type: url-test`, `    url: ${q(testUrl)}`, `    interval: 86400`, `    lazy: false`, `    timeout: ${timeoutMs}`, `    expected-status: ${DEEP_EXPECTED_STATUS}`, `    proxies:`);
   for (const { name } of named) lines.push(`      - ${q(name)}`);
   lines.push(``, `rules:`, `  - MATCH,RELAYTEST`, ``); return lines.join("\n");
@@ -57,12 +77,7 @@ async function runOnce(nodes: ParsedNode[], testUrl: string, timeoutMs: number):
   const child = spawn(bin, ["-d", dir, "-f", configPath], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SKIP_SYSTEM_PROXY: "1" }, windowsHide: process.platform === "win32" });
   registerMihomoChild(child); child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8"); child.stdout?.on("data", (chunk: string) => append("stdout", chunk)); child.stderr?.on("data", (chunk: string) => append("stderr", chunk));
   try {
-    const died = new Promise<never>((_, reject) => {
-      let exitCode: number | null = null; let exitSignal: NodeJS.Signals | null = null;
-      child.once("exit", (code, signal) => { exitCode = code; exitSignal = signal; });
-      child.once("close", () => reject(new Error(formatMihomoExit(exitCode, exitSignal, [stderr, stdout].filter(Boolean).join(" | ")))));
-      child.once("error", (err) => setImmediate(() => reject(err)));
-    });
+    const died = new Promise<never>((_, reject) => { let exitCode: number | null = null; let exitSignal: NodeJS.Signals | null = null; child.once("exit", (code, signal) => { exitCode = code; exitSignal = signal; }); child.once("close", () => reject(new Error(formatMihomoExit(exitCode, exitSignal, [stderr, stdout].filter(Boolean).join(" | "))))); child.once("error", (err) => setImmediate(() => reject(err))); });
     try { await Promise.race([waitApi(apiPort, 8000), died]); }
     catch (err) { if (err instanceof Error) throw err; throw new Error(String(err)); }
     const measured = await groupDelays(apiPort, testUrl, probeTimeout, probeTimeout); for (const { node, name } of named) { const delay = measured[name]; delays.set(node.id, isAliveDelay(delay) ? delay : null); } return { delays, loaded: named.length, delayed: Object.keys(measured).length, unknown: 0 };
