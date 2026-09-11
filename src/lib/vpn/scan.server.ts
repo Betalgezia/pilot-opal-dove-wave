@@ -2,7 +2,7 @@ import { DEFAULT_TEST_URL } from "./constants";
 import { fetchSourceText } from "./fetch-source.server";
 import { canRunMihomo } from "./mihomo-bin.server";
 import { enrichNodesWithGeoIp } from "./geoip.server";
-import { endpointKey, parseSubscription } from "./parse";
+import { parseSubscription } from "./parse";
 import { mergeNodesByIdentity } from "./node-identity";
 import { probeNodes } from "./probe.server";
 import { sampleForProbe } from "./sample";
@@ -60,7 +60,8 @@ export async function runScan(sources: SourceDef[], opts?: ScanOpts): Promise<Sc
     catch (err) { probeNote = mergeProbeNote(probeNote, err instanceof Error ? `Дополнительная проверка ресурсов пропущена: ${err.message}` : "Дополнительная проверка ресурсов пропущена"); }
   }
   const deepVerifyMs = Date.now() - deepStart; throwIfCancelled();
-  const qualityStart = Date.now(); const now = Date.now(); probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(qualityHistoryKey(node)), now) })); const qualityMs = Date.now() - qualityStart; await recordQualityResults(probed.filter((n) => n.probeState === "checked"));
+  const qualityStart = Date.now(); const now = Date.now(); probed = probed.map((node) => ({ ...node, ...scoreNode(node, history.get(qualityHistoryKey(node)), now) })); const qualityMs = Date.now() - qualityStart;
+  if (probeMode === "mihomo") await recordQualityResults(probed.filter((n) => n.probeState === "checked"));
 
   const sourcesOut: SourceScan[] = fetched.map((f) => { const mine = probed.filter((n) => (n.sourceIds ?? [n.sourceId]).includes(f.source.id)); const alive = mine.filter((n) => n.alive); const latencies = alive.map((n) => n.latency).filter((x): x is number => x !== null); return { id: f.source.id, name: f.source.name, url: f.source.url, ok: f.error === null, error: f.error, parsed: f.nodes.length, unique: new Set(f.nodes.map((n) => n.id)).size, probed: mine.length, alive: alive.length, bestLatency: latencies.length ? Math.min(...latencies) : null }; });
   const ranked = rankNodes(probed); const totalMs = Date.now() - started; const metrics: ScanMetrics = { fetchMs: Math.max(fetchWallMs, fetched.reduce((sum, item) => sum + item.fetchMs, 0)), parseMs: fetched.reduce((sum, item) => sum + item.parseMs, 0), sampleMs, probeMs, geoIpMs, deepVerifyMs, qualityMs, totalMs, sampled: sampled.length, deepVerified: ranked.filter((node) => Object.keys(node.targetResults ?? {}).length > 0).length, targetChecks: countTargetChecks(ranked), mihomoLoaded, mihomoDelayReceived, unknown, deduplicated, mihomoRounds };
