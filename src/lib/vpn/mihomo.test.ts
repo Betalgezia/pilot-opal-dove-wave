@@ -9,7 +9,7 @@ import { canRunMihomo, ensureMihomoBinary } from "./mihomo-bin.server.ts";
 import type { ParsedNode, SourceScan } from "./types.ts";
 
 const sources: SourceScan[] = [{ id: "src", name: "source", url: "https://example.invalid/list", ok: true, error: null, parsed: 2, unique: 2, probed: 2, alive: 2, bestLatency: 100 }];
-function makeNode(id: string): ParsedNode {
+function makeNode(id: string, extra: Partial<ParsedNode> = {}): ParsedNode {
   return {
     id,
     uri: `vless://${id}@example.com:443?type=tcp&security=tls&sni=example.com`,
@@ -24,6 +24,7 @@ function makeNode(id: string): ParsedNode {
     security: "tls",
     network: "tcp",
     extra: {},
+    ...extra,
   };
 }
 const node = makeNode("test-node");
@@ -43,6 +44,21 @@ test("generated YAML uses unique proxy names on collisions", () => {
   const names = [...yaml.matchAll(/^  - name: "([^"]+)"$/gm)].map((m) => m[1]);
   assert.equal(new Set(names).size, names.length);
   assert.ok(names.some((name) => name.endsWith("-2")));
+});
+
+test("xhttp is emitted as native mihomo xhttp transport", () => {
+  const xhttp = makeNode("xhttp", {
+    uri: "vless://xhttp@example.com:443?type=xhttp",
+    network: "xhttp",
+    security: "reality",
+    path: "/",
+    hostHeader: "passport.yandex.ru",
+    extra: { mode: "packet-up" },
+  });
+  const yaml = buildMihomoYaml([xhttp], sources);
+  assert.match(yaml, /\n    network: "xhttp"/);
+  assert.match(yaml, /\n    xhttp-opts:\n/);
+  assert.match(yaml, /\n      mode: "packet-up"/);
 });
 
 test("generated YAML is accepted by mihomo when the local binary is available", async (t) => {
