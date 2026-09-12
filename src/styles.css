@@ -37,6 +37,8 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scrollbar-width: thin;
+    scrollbar-color: #24242a transparent;
   }
   body {
     background: var(--color-bg);
@@ -55,6 +57,31 @@
   p {
     text-wrap: pretty;
   }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #24242a transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: #24242a;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #34343c;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -70,18 +97,10 @@
 .stagger-in > * {
   animation: rise-in var(--duration-slow) var(--ease-smooth) both;
 }
-.stagger-in > *:nth-child(1) {
-  animation-delay: 0ms;
-}
-.stagger-in > *:nth-child(2) {
-  animation-delay: 40ms;
-}
-.stagger-in > *:nth-child(3) {
-  animation-delay: 80ms;
-}
-.stagger-in > *:nth-child(4) {
-  animation-delay: 120ms;
-}
+.stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-in > *:nth-child(2) { animation-delay: 40ms; }
+.stagger-in > *:nth-child(3) { animation-delay: 80ms; }
+.stagger-in > *:nth-child(4) { animation-delay: 120ms; }
 
 @keyframes rise-in {
   from {
@@ -96,12 +115,8 @@
   }
 }
 
-.dial-spin {
-  animation: spin 1.1s linear infinite;
-}
+.dial-spin { animation: spin 1.1s linear infinite; }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
