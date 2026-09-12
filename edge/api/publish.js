@@ -12,7 +12,15 @@ async function kv(command) {
   return (await res.json()).result;
 }
 
+function cors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 export default async function handler(req, res) {
+  cors(res);
+  if (req.method === "OPTIONS") return res.status(204).end();
   if ((req.query.secret || "") !== SECRET || !SECRET) return res.status(403).send("forbidden");
   if (req.method !== "POST") return res.status(405).send("method not allowed");
   const chunks = [];
@@ -20,6 +28,7 @@ export default async function handler(req, res) {
   const body = Buffer.concat(chunks).toString("utf8");
   if (!body || body.length < 16) return res.status(400).send("empty payload");
   const fmt = (req.query.fmt || "b64").toString();
+  if (fmt !== "b64" && fmt !== "clash") return res.status(400).send("unsupported format");
   await kv(["set", "sub:" + fmt, body]);
   await kv(["set", "sub:at", new Date().toISOString()]);
   res.status(200).send("ok");
