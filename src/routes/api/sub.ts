@@ -59,7 +59,7 @@ export const Route = createFileRoute("/api/sub")({
         const url = new URL(request.url);
         const live = url.searchParams.get("live") === "1";
         const profile = live ? await getSubscriptionProfile() : null;
-        const fmtRaw = (live ? profile?.fmt : url.searchParams.get("fmt")) ?? DEFAULT_EXPORT_FMT;
+        const fmtRaw = url.searchParams.get("fmt") ?? (live ? profile?.fmt : null) ?? DEFAULT_EXPORT_FMT;
         const fmt = formatFromRaw(String(fmtRaw).toLowerCase());
         const limitRaw = live ? profile?.n : url.searchParams.get("n");
         const limit = Math.min(60, Math.max(4, Number(limitRaw || DEFAULT_EXPORT_N) || DEFAULT_EXPORT_N));

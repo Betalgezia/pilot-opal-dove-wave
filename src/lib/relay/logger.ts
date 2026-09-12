@@ -1,5 +1,5 @@
 export type LogLevel = "info" | "warn" | "error";
-export type LogCategory = "scan" | "mihomo" | "fetch" | "parse" | "system";
+export type LogCategory = "scan" | "mihomo" | "fetch" | "parse" | "system" | "publish";
 
 export interface RelayLog {
   id: string;
@@ -23,8 +23,12 @@ export const relayLogger = {
   info(category: LogCategory, message: string, data?: Record<string, unknown>) { push("info", category, message, data); },
   warn(category: LogCategory, message: string, data?: Record<string, unknown>) { push("warn", category, message, data); },
   error(category: LogCategory, message: string, data?: Record<string, unknown>) { push("error", category, message, data); },
-  getLogs(options: { level?: LogLevel; since?: number } = {}) {
-    return logs.filter((entry) => (!options.level || entry.level === options.level) && (!options.since || entry.ts >= options.since));
+  getLogs(options: { level?: LogLevel; category?: LogCategory; since?: number } = {}) {
+    return logs.filter((entry) =>
+      (!options.level || entry.level === options.level) &&
+      (!options.category || entry.category === options.category) &&
+      (!options.since || entry.ts >= options.since),
+    );
   },
   clear() { logs.length = 0; },
 };
