@@ -8,7 +8,7 @@
  * mismatch long after the fact. Anything that starts Vite directly bypasses it.
  *
  * Only `VITE_`-prefixed keys are honored: the file is a build flag carrier, not
- * a secret store, and only `VITE_` vars reach the browser anyway. A real
+ * a secret store, and only VITE_ vars reach the browser anyway. A real
  * `process.env` entry always wins, so an explicit override still works.
  *
  * That precedence also means the file governs this workspace only. A deployed
@@ -111,8 +111,13 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const spawnCommand = process.platform === "win32" && command === "vite" ? "vite.cmd" : command;
-  const child = spawn(spawnCommand, args, { stdio: "inherit", env });
+  const isWindows = process.platform === "win32";
+  const spawnCommand = isWindows && command === "vite" ? "vite.cmd" : command;
+  const child = spawn(spawnCommand, args, {
+    stdio: "inherit",
+    env,
+    ...(isWindows ? { shell: true } : {}),
+  });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));
