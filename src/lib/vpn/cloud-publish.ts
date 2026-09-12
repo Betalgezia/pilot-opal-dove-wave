@@ -1,7 +1,12 @@
+import { getPanelFilters } from "./panel-filters.functions";
+import { buildB64Subscription, buildMihomoYaml } from "./mihomo";
+import { pickExportNodes } from "./select";
+import type { ScanResult } from "./types";
+
 export interface CloudPublishSettings {
-  edgeUrl: string;
-  secret: string;
-  nodeLimit: number;
+  gistId: string;
+  token: string;
+  username: string;
 }
 
 export interface CloudPublishResult {
@@ -9,26 +14,41 @@ export interface CloudPublishResult {
   status: number;
   ok: boolean;
   bytes: number;
+  live: number;
   at: number;
+  url: string;
   error?: string;
+}
+
+export interface CloudPublishStatus {
+  warning: boolean;
+  at: number | null;
+  results: CloudPublishResult[];
 }
 
 const SETTINGS_KEY = "relay:cloud-publish-settings";
 const STATUS_KEY = "relay:cloud-publish-status";
+const AUTO_KEY = "relay:cloud-auto";
+
+const DEFAULT_SETTINGS: CloudPublishSettings = { gistId: "", token: "", username: "" };
+
+function isValidGistId(value: string): boolean {
+  return /^[a-f0-9]{32}$/i.test(value.trim());
+}
 
 export function loadCloudPublishSettings(): CloudPublishSettings {
-  if (typeof window === "undefined") return { edgeUrl: "", secret: "", nodeLimit: 40 };
+  if (typeof window === "undefined") return { ...DEFAULT_SETTINGS };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { edgeUrl: "", secret: "", nodeLimit: 40 };
+    if (!raw) return { ...DEFAULT_SETTINGS };
     const value = JSON.parse(raw) as Partial<CloudPublishSettings>;
     return {
-      edgeUrl: typeof value.edgeUrl === "string" ? value.edgeUrl : "",
-      secret: typeof value.secret === "string" ? value.secret : "",
-      nodeLimit: Number.isFinite(value.nodeLimit) ? Number(value.nodeLimit) : 40,
+      gistId: typeof value.gistId === "string" ? value.gistId : "",
+      token: typeof value.token === "string" ? value.token : "",
+      username: typeof value.username === "string" ? value.username : "",
     };
   } catch {
-    return { edgeUrl: "", secret: "", nodeLimit: 40 };
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
@@ -37,10 +57,12 @@ export function saveCloudPublishSettings(settings: CloudPublishSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-export interface CloudPublishStatus {
-  warning: boolean;
-  at: number | null;
-  results: CloudPublishResult[];
+export function readCloudAuto(): boolean {
+  return typeof window !== "undefined" && localStorage.getItem(AUTO_KEY) === "true";
+}
+
+export function saveCloudAuto(value: boolean): void {
+  if (typeof window !== "undefined") localStorage.setItem(AUTO_KEY, String(value));
 }
 
 export function readCloudPublishStatus(): CloudPublishStatus {
@@ -60,81 +82,103 @@ export function readCloudPublishStatus(): CloudPublishStatus {
 }
 
 function writeStatus(results: CloudPublishResult[]): void {
-  const status: CloudPublishStatus = {
-    warning: results.some((item) => !item.ok),
-    at: Date.now(),
-    results: results.slice(-10),
-  };
+  const existing = readCloudPublishStatus();
+  const merged = [...existing.results, ...results].slice(-10);
+  const status: CloudPublishStatus = { warning: merged.some((item) => !item.ok), at: Date.now(), results: merged };
   if (typeof window !== "undefined") {
     localStorage.setItem(STATUS_KEY, JSON.stringify(status));
     window.dispatchEvent(new CustomEvent("relay:cloud-status"));
   }
 }
 
-async function writeLog(level: "info" | "warn", message: string, data: Record<string, unknown>) {
+async function writeLog(level: "info" | "warn", message: string, data: Record<string, unknown>): Promise<void> {
   try {
     await fetch("/api/logs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ level, category: "system", message, data }),
+      body: JSON.stringify({ level, category: "publish", message, data }),
       keepalive: true,
     });
   } catch {
-    // Publication must not fail because local logging is unavailable.
+    // Logging failure must not affect publication.
   }
 }
 
-function normalizeEdgeUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
+function friendlyError(status: number, details: string): string {
+  if (status === 403) return "Проверьте GitHub Token, нужны права gist";
+  if (status === 404) return "Проверьте Gist ID, возможно gist удалён";
+  if (status === 422) return `Ошибка формирования подписки: ${details || "GitHub отклонил содержимое"}`;
+  return `GitHub API ${status}: ${details || "ошибка запроса"}`;
 }
 
-export async function publishToEdge(settings = loadCloudPublishSettings()): Promise<CloudPublishResult[]> {
-  const edgeUrl = normalizeEdgeUrl(settings.edgeUrl);
-  if (!edgeUrl) throw new Error("Edge URL не задан");
-  if (!settings.secret) throw new Error("Секрет Edge не задан");
+async function getPayload(result: ScanResult, fmt: "b64" | "clash") {
+  const filters = await getPanelFilters();
+  const nodes = pickExportNodes(result, 60, {
+    protocols: filters.protocols,
+    countryMode: filters.countryMode,
+    countries: filters.countries,
+    whitelistOnly: filters.whitelistOnly,
+    blacklistEnabled: filters.blacklistEnabled,
+    blacklistEntries: filters.blacklistEntries,
+  });
+  const subscription = fmt === "b64" ? buildB64Subscription(nodes) : buildMihomoYaml(nodes, result.sources);
+  return { subscription, live: nodes.length };
+}
 
-  const results: CloudPublishResult[] = [];
+export async function publishToGist({ gistId, token, username, subscription, format = "b64", liveCount = 0 }: CloudPublishSettings & { subscription: string; format?: "b64" | "clash"; liveCount?: number }): Promise<CloudPublishResult> {
+  const id = gistId.trim();
+  const user = username.trim();
+  const filename = format === "clash" ? "relay.yaml" : "relay.b64";
+  if (!isValidGistId(id)) throw new Error("Gist ID должен содержать 32 hex-символа");
+  if (!token.trim()) throw new Error("GitHub Token не задан");
+  if (!user) throw new Error("GitHub Username не задан");
+  const at = new Date().toISOString();
+  const bytes = new TextEncoder().encode(subscription).byteLength;
+  const url = `https://gist.githubusercontent.com/${encodeURIComponent(user)}/${id}/raw/${filename}`;
+  const response = await fetch(`https://api.github.com/gists/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ files: {
+      [filename]: { content: subscription },
+      "published.at": { content: at },
+      "live.count": { content: String(liveCount) },
+    } }),
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(friendlyError(response.status, details));
+  }
+  return { fmt: format, status: response.status, ok: true, bytes, live: liveCount, at: Date.now(), url };
+}
+
+export async function publishScanToGist(result: ScanResult, settings = loadCloudPublishSettings()): Promise<CloudPublishResult[]> {
+  const outputs: CloudPublishResult[] = [];
   for (const fmt of ["b64", "clash"] as const) {
     const startedAt = Date.now();
     try {
-      const local = new URL("/api/sub", window.location.origin);
-      local.searchParams.set("live", "1");
-      local.searchParams.set("fmt", fmt);
-      const sourceResponse = await fetch(local, { cache: "no-store" });
-      if (!sourceResponse.ok) throw new Error(`local subscription HTTP ${sourceResponse.status}`);
-      const payload = await sourceResponse.text();
-      if (!payload || payload.length < 16) throw new Error("empty local subscription");
-
-      const target = new URL(edgeUrl);
-      target.searchParams.set("secret", settings.secret);
-      target.searchParams.set("fmt", fmt);
-      const response = await fetch(target, {
-        method: "POST",
-        headers: { "content-type": fmt === "clash" ? "text/yaml; charset=utf-8" : "text/plain; charset=utf-8" },
-        body: payload,
-      });
-      const item: CloudPublishResult = {
-        fmt,
-        status: response.status,
-        ok: response.ok,
-        bytes: new TextEncoder().encode(payload).byteLength,
-        at: startedAt,
-      };
-      results.push(item);
-      await writeLog(response.ok ? "info" : "warn", `Cloud publish ${fmt}: HTTP ${response.status}`, {
-        fmt,
-        status: response.status,
-        bytes: item.bytes,
-        at: startedAt,
+      const { subscription, live } = await getPayload(result, fmt);
+      const published = await publishToGist({ ...settings, subscription, format: fmt, liveCount: live });
+      const item = { ...published, at: startedAt };
+      outputs.push(item);
+      await writeLog("info", `[PUBLISH] gists/${settings.gistId.trim()} → ${published.status} ok, ${live} live, ${formatBytes(published.bytes)}`, {
+        gistId: settings.gistId.trim(), username: settings.username.trim(), fmt, status: published.status, bytes: published.bytes, live, url: published.url, at: published.at,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "network error";
-      const item: CloudPublishResult = { fmt, status: 0, ok: false, bytes: 0, at: startedAt, error: message };
-      results.push(item);
-      await writeLog("warn", `Cloud publish ${fmt}: ${message}`, { fmt, status: 0, bytes: 0, at: startedAt, error: message });
+      const bytes = 0;
+      const item: CloudPublishResult = { fmt, status: 0, ok: false, bytes, live: 0, at: startedAt, url: `https://gist.githubusercontent.com/${settings.username.trim()}/${settings.gistId.trim()}/raw/${fmt === "clash" ? "relay.yaml" : "relay.b64"}`, error: message };
+      outputs.push(item);
+      await writeLog("warn", `[PUBLISH] failed: ${message}`, { gistId: settings.gistId.trim(), username: settings.username.trim(), fmt, status: 0, bytes, live: 0, url: item.url, error: message, at: startedAt });
     }
   }
+  writeStatus(outputs);
+  return outputs;
+}
 
-  writeStatus(results);
-  return results;
+export function formatBytes(bytes: number): string {
+  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
 }
