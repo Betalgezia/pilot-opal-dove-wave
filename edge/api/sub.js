@@ -12,9 +12,19 @@ async function kv(command) {
   return (await res.json()).result;
 }
 
+function cors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 export default async function handler(req, res) {
+  cors(res);
+  if (req.method === "OPTIONS") return res.status(204).end();
   if ((req.query.secret || "") !== SECRET || !SECRET) return res.status(403).send("forbidden");
+  if (req.method !== "GET") return res.status(405).send("method not allowed");
   const fmt = (req.query.fmt || "b64").toString();
+  if (fmt !== "b64" && fmt !== "clash") return res.status(400).send("unsupported format");
   const sub = await kv(["get", "sub:" + fmt]);
   const at = await kv(["get", "sub:at"]);
   if (!sub) return res.status(404).send("not published yet");
