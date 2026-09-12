@@ -14,29 +14,22 @@ import {
 } from "@/lib/vpn/cloud-publish";
 
 export const CLOUD_SETTINGS_CHANGED = "relay:cloud-settings";
-export const CLOUD_PUBLISH_NOW = "relay:cloud-publish-now";
 const AUTO_KEY = "relay:cloud-auto";
 
 export function CloudPublishPanel() {
   const [settings, setSettings] = useState<CloudPublishSettings>(loadCloudPublishSettings());
   const [status, setStatus] = useState(readCloudPublishStatus());
-  const [auto, setAuto] = useState(() => localStorage.getItem(AUTO_KEY) === "true");
+  const [auto, setAuto] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setAuto(localStorage.getItem(AUTO_KEY) === "true");
+  }, []);
 
   useEffect(() => {
     const onStatus = () => setStatus(readCloudPublishStatus());
     window.addEventListener("relay:cloud-status", onStatus);
     return () => window.removeEventListener("relay:cloud-status", onStatus);
-  }, []);
-
-  useEffect(() => {
-    const onStorage = () => {
-      setSettings(loadCloudPublishSettings());
-      setStatus(readCloudPublishStatus());
-      setAuto(localStorage.getItem(AUTO_KEY) === "true");
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   function update(next: CloudPublishSettings) {
@@ -60,12 +53,6 @@ export function CloudPublishPanel() {
     }
   }
 
-  useEffect(() => {
-    const onPublish = () => void publish();
-    window.addEventListener(CLOUD_PUBLISH_NOW, onPublish);
-    return () => window.removeEventListener(CLOUD_PUBLISH_NOW, onPublish);
-  }, [settings]);
-
   const last = status.results.length ? status.results[status.results.length - 1] : null;
 
   return <SettingsCard icon={<Cloud />} title="Публикация в облако" description="Vercel Edge + Upstash: внешний стабильный endpoint подписки">
@@ -78,7 +65,7 @@ export function CloudPublishPanel() {
       <Switch checked={auto} disabled={!settings.edgeUrl || !settings.secret} onCheckedChange={(checked) => { setAuto(checked); localStorage.setItem(AUTO_KEY, String(checked)); }} />
     </div>
     <div className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => void publish()} disabled={busy || !settings.edgeUrl || !settings.secret}>{busy ? <RefreshCw className="animate-spin" /> : <UploadCloud />}{busy ? "Публикация…" : "Опубликовать сейчас"}</Button>{last ? <span className={`text-[10px] ${last.ok ? "text-live" : "text-warning"}`}>{last.ok ? <Check className="mr-1 inline size-3" /> : null}Последняя: {new Date(last.at).toLocaleString()} · HTTP {last.status}</span> : <span className="text-[10px] text-fg-subtle">Последняя публикация: нет данных</span>}</div>
-    <p className="text-[10px] text-fg-subtle">Локальный секрет хранится только в браузере и не записывается в Relay logs.</p>
+    <p className="text-[10px] text-fg-subtle">Секрет хранится только в браузере и не записывается в Relay logs.</p>
   </SettingsCard>;
 }
 
@@ -122,9 +109,10 @@ export function CloudPublishController() {
 }
 
 export function CloudStatusDot() {
-  const [warning, setWarning] = useState(() => readCloudPublishStatus().warning);
+  const [warning, setWarning] = useState(false);
   useEffect(() => {
     const update = () => setWarning(readCloudPublishStatus().warning);
+    update();
     window.addEventListener("relay:cloud-status", update);
     return () => window.removeEventListener("relay:cloud-status", update);
   }, []);
