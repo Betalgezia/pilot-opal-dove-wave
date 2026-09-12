@@ -14,6 +14,27 @@ export const Route = createFileRoute("/api/logs")({
         const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : undefined;
         return Response.json({ logs: relayLogger.getLogs({ level, since }) });
       },
+      POST: async ({ request }) => {
+        try {
+          const body = (await request.json()) as {
+            level?: unknown;
+            category?: unknown;
+            message?: unknown;
+            data?: unknown;
+          };
+          const level = body.level && levels.has(body.level as LogLevel) ? body.level as LogLevel : null;
+          if (!level || body.category !== "system" || typeof body.message !== "string" || !body.message.trim()) {
+            return new Response("invalid log entry", { status: 400 });
+          }
+          const data = body.data && typeof body.data === "object" && !Array.isArray(body.data)
+            ? body.data as Record<string, unknown>
+            : undefined;
+          relayLogger[level]("system", body.message.trim(), data);
+          return Response.json({ ok: true }, { status: 201 });
+        } catch {
+          return new Response("invalid json", { status: 400 });
+        }
+      },
     },
   },
 });
