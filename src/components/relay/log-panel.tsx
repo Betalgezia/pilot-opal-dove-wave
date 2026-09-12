@@ -31,7 +31,7 @@ export function LogPanel() {
     const res = await fetch(`/api/logs?${params}`);
     if (!res.ok) return;
     const data = await res.json() as { logs: RelayLog[] };
-    setLogs(data.logs);
+    setLogs(category === "publish" ? data.logs.slice(-10) : data.logs);
   }
 
   useEffect(() => { void load(); const id = window.setInterval(() => void load(), 2000); return () => window.clearInterval(id); }, [level, category, windowMs]);
@@ -50,7 +50,7 @@ export function LogPanel() {
   return <section className="overflow-hidden rounded-2xl bg-surface shadow-border">
     <div className="border-b border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2"><Activity className="size-4" /><div><h2 className="text-sm font-medium">Журнал событий</h2><p className="text-xs text-fg-muted">{logs.length} записей · автообновление 2 сек</p></div><span className="ml-1 size-2 rounded-full bg-live shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-live)_15%,transparent)]" /></div>
+        <div className="flex items-center gap-2"><Activity className="size-4" /><div><h2 className="text-sm font-medium">Журнал событий</h2><p className="text-xs text-fg-muted">{logs.length} записей{category === "publish" ? " · последние 10 публикаций" : " · автообновление 2 сек"}</p></div><span className="ml-1 size-2 rounded-full bg-live shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-live)_15%,transparent)]" /></div>
         <div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => void clear()}><Trash2 />Очистить</Button><Button variant="ghost" size="sm" onClick={() => void copyAll()}><Clipboard />Копировать всё</Button><Button variant="secondary" size="sm" asChild><a href="/api/logs/export"><Download />Экспорт JSON</a></Button></div>
       </div>
       <div className="mt-4 grid gap-2 lg:grid-cols-[auto_auto_auto_minmax(0,1fr)]">
@@ -61,15 +61,7 @@ export function LogPanel() {
       </div>
     </div>
     <div ref={scrollRef} onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 36; }} className="max-h-[min(68vh,720px)] overflow-y-auto font-mono text-xs">
-      {filtered.length === 0 ? <div className="p-10 text-center text-fg-muted">Нет событий по текущему фильтру.</div> : <div className="divide-y divide-border/60">{filtered.map((log) => {
-        const isOpen = expanded === log.id;
-        const tone = log.level === "error" ? "text-danger" : log.level === "warn" ? "text-warning" : "text-live";
-        return <button key={log.id} type="button" onClick={() => setExpanded(isOpen ? null : log.id)} className="block w-full px-4 py-3 text-left hover:bg-bg-subtle/60">
-          <div className="flex items-start gap-3"><span className="w-[66px] shrink-0 text-fg-subtle">{fmtTime(log.ts)}</span><span className={`w-12 shrink-0 font-semibold ${tone}`}>{log.level.toUpperCase()}</span><span className="w-16 shrink-0 rounded bg-bg-subtle px-1.5 py-0.5 text-center text-[10px] text-fg-muted">{categoryLabels[log.category]}</span><span className="min-w-0 flex-1 break-words font-sans text-sm text-fg">{log.message}</span><ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-fg-subtle transition-transform ${isOpen ? "rotate-180" : ""}`} /></div>
-          {log.data && !isOpen ? <p className="mt-1 truncate pl-[81px] text-[10px] text-fg-subtle">{fmtData(log.data)}</p> : null}
-          {isOpen ? <pre className="mt-3 whitespace-pre-wrap break-all rounded-lg bg-bg-subtle p-3 text-[10px] leading-relaxed text-fg-muted">{fmtData(log.data) || "Без дополнительных данных"}</pre> : null}
-        </button>;
-      })}</div>}
+      {filtered.length === 0 ? <div className="p-10 text-center text-fg-muted">Нет событий по текущему фильтру.</div> : <div className="divide-y divide-border/60">{filtered.map((log) => { const isOpen = expanded === log.id; const tone = log.level === "error" ? "text-danger" : log.level === "warn" ? "text-warning" : "text-live"; return <button key={log.id} type="button" onClick={() => setExpanded(isOpen ? null : log.id)} className="block w-full px-4 py-3 text-left hover:bg-bg-subtle/60"><div className="flex items-start gap-3"><span className="w-[66px] shrink-0 text-fg-subtle">{fmtTime(log.ts)}</span><span className={`w-12 shrink-0 font-semibold ${tone}`}>{log.level.toUpperCase()}</span><span className="w-16 shrink-0 rounded bg-bg-subtle px-1.5 py-0.5 text-center text-[10px] text-fg-muted">{categoryLabels[log.category]}</span><span className="min-w-0 flex-1 break-words font-sans text-sm text-fg">{log.message}</span><ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-fg-subtle transition-transform ${isOpen ? "rotate-180" : ""}`} /></div>{log.data && !isOpen ? <p className="mt-1 truncate pl-[81px] text-[10px] text-fg-subtle">{fmtData(log.data)}</p> : null}{isOpen ? <pre className="mt-3 whitespace-pre-wrap break-all rounded-lg bg-bg-subtle p-3 text-[10px] leading-relaxed text-fg-muted">{fmtData(log.data) || "Без дополнительных данных"}</pre> : null}</button>; })}</div>}
     </div>
   </section>;
 }
