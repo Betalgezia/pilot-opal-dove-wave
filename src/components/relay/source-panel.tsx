@@ -1,5 +1,5 @@
 import { CheckCircle2, Globe2, Plus, RefreshCw, Trash2, Wifi, Zap } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,4 +44,4 @@ export function SourcePanel({ sources, scans, onChange }: { sources: SourceDef[]
   </div>;
 }
 
-function Metric({ icon, label, value, tone = "" }: { icon: React.ReactNode; label: string; value: number; tone?: "live" | "" }) { return <div className="rounded-2xl border border-border bg-surface p-4 shadow-border"><div className="flex items-center justify-between"><span className={`flex size-8 items-center justify-center rounded-lg bg-bg-subtle ${tone === "live" ? "text-live" : "text-primary"}`}>{icon}</span><span className="text-[9px] uppercase tracking-wider text-fg-subtle">{label}</span></div><p className={`mt-3 font-mono text-2xl leading-none ${tone === "live" ? "text-live" : "text-fg"}`}>{value}</p></div>; }
+function Metric({ icon, label, value, tone = "" }: { icon: ReactNode; label: string; value: number; tone?: "live" | "" }) { return <div className="rounded-2xl border border-border bg-surface p-4 shadow-border"><div className="flex items-center justify-between"><span className={`flex size-8 items-center justify-center rounded-lg bg-bg-subtle ${tone === "live" ? "text-live" : "text-primary"}`}>{icon}</span><span className="text-[9px] uppercase tracking-wider text-fg-subtle">{label}</span></div><p className={`mt-3 font-mono text-2xl leading-none ${tone === "live" ? "text-live" : "text-fg"}`}>{value}</p></div>; }
